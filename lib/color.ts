@@ -1,12 +1,15 @@
-export const NEUTRALS = new Set(["black","white","gray","grey","navy","tan","beige","olive","khaki","denim"]);
+export const NEUTRALS = new Set([
+  "black", "white", "gray", "grey", "navy", "tan", "beige", "olive", 
+  "khaki", "denim", "cream", "brown"
+]);
 
 const buckets: Record<string,string[]> = {
-  blue: ["blue","navy","teal","turquoise","cyan"],
-  orange: ["orange","rust","coral","amber"],
-  red: ["red","maroon","burgundy"],
-  green: ["green","olive","forest"],
-  yellow: ["yellow","mustard","gold"],
-  purple: ["purple","violet","lilac","magenta"]
+  blue: ["blue", "lightblue", "navy", "teal", "turquoise", "cyan"],
+  orange: ["orange", "rust", "coral", "amber"],
+  red: ["red", "maroon", "burgundy", "pink"],
+  green: ["green", "olive", "forest"],
+  yellow: ["yellow", "mustard", "gold"],
+  purple: ["purple", "violet", "lilac", "magenta"]
 };
 
 export function hasComplementaryPair(colors: string[]) {

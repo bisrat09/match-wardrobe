@@ -75,8 +75,6 @@ export async function getAllGarments(): Promise<Garment[]> {
       isDirty: r.isDirty === 1,
       favorite: r.favorite === 1
     };
-    // Debug log to see what dress codes are actually stored
-    console.log(`Garment ${r.id} type=${r.type} dressCodes=`, garment.dressCodes);
     return garment;
   });
 }
@@ -113,6 +111,75 @@ export async function updateWear(
   );
   
   return { success: true, logId };
+}
+
+export async function updateGarment(id: string, updates: Partial<Omit<Garment, "id">>) {
+  const updateFields: string[] = [];
+  const values: any[] = [];
+  
+  if (updates.type !== undefined) {
+    updateFields.push("type = ?");
+    values.push(updates.type);
+  }
+  if (updates.name !== undefined) {
+    updateFields.push("name = ?");
+    values.push(updates.name || null);
+  }
+  if (updates.colors !== undefined) {
+    updateFields.push("colors = ?");
+    values.push(JSON.stringify(updates.colors));
+  }
+  if (updates.warmth !== undefined) {
+    updateFields.push("warmth = ?");
+    values.push(updates.warmth);
+  }
+  if (updates.waterResistant !== undefined) {
+    updateFields.push("waterResistant = ?");
+    values.push(updates.waterResistant);
+  }
+  if (updates.dressCodes !== undefined) {
+    updateFields.push("dressCodes = ?");
+    values.push(JSON.stringify(updates.dressCodes));
+  }
+  if (updates.imageUri !== undefined) {
+    updateFields.push("imageUri = ?");
+    values.push(updates.imageUri);
+  }
+  if (updates.isDirty !== undefined) {
+    updateFields.push("isDirty = ?");
+    values.push(updates.isDirty ? 1 : 0);
+  }
+  if (updates.favorite !== undefined) {
+    updateFields.push("favorite = ?");
+    values.push(updates.favorite ? 1 : 0);
+  }
+  
+  if (updateFields.length === 0) {
+    return { success: false, error: "No fields to update" };
+  }
+  
+  values.push(id); // Add id for WHERE clause
+  
+  try {
+    await db.runAsync(
+      `UPDATE garments SET ${updateFields.join(", ")} WHERE id = ?`,
+      ...values
+    );
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to update garment:", error);
+    return { success: false, error };
+  }
+}
+
+export async function deleteGarment(id: string) {
+  try {
+    await db.runAsync(`DELETE FROM garments WHERE id = ?`, id);
+    return { success: true };
+  } catch (error) {
+    console.error("Failed to delete garment:", error);
+    return { success: false, error };
+  }
 }
 
 export async function clearAllGarments() {

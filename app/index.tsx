@@ -31,6 +31,74 @@ export default function TodayScreen() {
     setOutfits(res);
   };
 
+  const shuffleOutfit = (index: number) => {
+    if (!weather) return;
+    
+    const currentOutfit = outfits[index];
+    
+    // Get all clean garments that match the dress code
+    const cleanGarments = garments.filter(g => !g.isDirty && g.dressCodes.includes(dressCode));
+    
+    // Separate by type
+    const tops = cleanGarments.filter(g => g.type === "top");
+    const bottoms = cleanGarments.filter(g => g.type === "bottom");
+    const shoes = cleanGarments.filter(g => g.type === "shoe");
+    const outerwear = cleanGarments.filter(g => g.type === "outerwear");
+    
+    
+    // Try to build a new outfit by randomly selecting different items
+    let newTop = currentOutfit.top;
+    let newBottom = currentOutfit.bottom;
+    let newShoe = currentOutfit.shoe;
+    
+    // Try to get different items for each category
+    const differentTops = tops.filter(t => t.id !== currentOutfit.top.id);
+    const differentBottoms = bottoms.filter(b => b.id !== currentOutfit.bottom.id);
+    const differentShoes = shoes.filter(s => s.id !== currentOutfit.shoe.id);
+    
+    // Randomly decide which items to change (at least one must change)
+    const changeTop = Math.random() > 0.3 && differentTops.length > 0;
+    const changeBottom = Math.random() > 0.3 && differentBottoms.length > 0;
+    const changeShoe = Math.random() > 0.3 && differentShoes.length > 0;
+    
+    // Ensure at least one item changes
+    if (!changeTop && !changeBottom && !changeShoe) {
+      if (differentTops.length > 0) {
+        newTop = differentTops[Math.floor(Math.random() * differentTops.length)];
+      } else if (differentBottoms.length > 0) {
+        newBottom = differentBottoms[Math.floor(Math.random() * differentBottoms.length)];
+      } else if (differentShoes.length > 0) {
+        newShoe = differentShoes[Math.floor(Math.random() * differentShoes.length)];
+      }
+    } else {
+      if (changeTop && differentTops.length > 0) {
+        newTop = differentTops[Math.floor(Math.random() * differentTops.length)];
+      }
+      if (changeBottom && differentBottoms.length > 0) {
+        newBottom = differentBottoms[Math.floor(Math.random() * differentBottoms.length)];
+      }
+      if (changeShoe && differentShoes.length > 0) {
+        newShoe = differentShoes[Math.floor(Math.random() * differentShoes.length)];
+      }
+    }
+    
+    
+    // Build new outfit object
+    const newOutfit = {
+      top: newTop,
+      bottom: newBottom,
+      shoe: newShoe,
+      outerwear: currentOutfit.outerwear // Keep same outerwear for now
+    };
+    
+    // Replace just the outfit at this index
+    setOutfits(prev => {
+      const updated = [...prev];
+      updated[index] = newOutfit;
+      return updated;
+    });
+  };
+
   const handleWearOutfit = async (outfit: any) => {
     const garmentIds = [
       outfit.top.id,
@@ -109,7 +177,7 @@ export default function TodayScreen() {
             </ScrollView>
             <View style={styles.btnRow}>
               <Button title="Wear" onPress={() => handleWearOutfit(o)} />
-              <Button title="Shuffle" onPress={() => setOutfits(prev => [...prev.slice(1), prev[0]])} />
+              <Button title="Shuffle" onPress={() => shuffleOutfit(i)} />
             </View>
           </View>
         </TouchableOpacity>

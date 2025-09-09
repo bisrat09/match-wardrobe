@@ -11,19 +11,9 @@ export function suggestOutfits(
   const nowISO = opts.nowISO ?? new Date().toISOString();
   const t = deriveTarget(weather);
 
-  console.log('=== Outfit Suggestion Debug ===');
-  console.log('Requested dress code:', opts.dressCode);
-  console.log('Total garments:', all.length);
-  
   let pool = all.filter(g => !g.isDirty);
-  console.log('After isDirty filter:', pool.length);
-  
   pool = pool.filter(g => g.dressCodes.includes(opts.dressCode));
-  console.log(`After dress code filter (${opts.dressCode}):`, pool.length);
-  console.log('Items passing dress code filter:', pool.map(g => `${g.type}: ${g.dressCodes.join(',')}`));
-  
   pool = pool.filter(g => notWornRecently(g, nowISO, daysNoRepeat));
-  console.log('After recently worn filter:', pool.length);
   if (t.needWaterproof) {
     pool = pool.filter(g => (g.type==="outerwear"||g.type==="shoe") ? g.waterResistant===1 : true);
   }
@@ -33,15 +23,7 @@ export function suggestOutfits(
   const shoes   = byTypeWarmth(pool, "shoe", t.shoeWarmth);
   const outers  = t.outerRequired ? byTypeWarmth(pool, "outerwear", t.outerWarmth) : [null];
 
-  console.log('Available by type:', {
-    tops: tops.length,
-    bottoms: bottoms.length,
-    shoes: shoes.length,
-    outerwear: outers.filter(o => o !== null).length
-  });
-
   if (!tops.length || !bottoms.length || !shoes.length) {
-    console.log('Cannot create outfit - missing required types');
     return [];
   }
 
