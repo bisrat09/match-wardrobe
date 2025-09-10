@@ -242,3 +242,77 @@ export async function updateAllGarmentsWithMultipleDressCodes() {
   
   return { success: true, updated: garments.length };
 }
+
+// Export all garments to JSON
+export async function exportGarments(): Promise<string> {
+  const garments = await getAllGarments();
+  const wearLogs = await db.getAllAsync<any>(`SELECT * FROM wear_logs ORDER BY wornAt DESC`);
+  
+  const exportData = {
+    version: 1,
+    exportDate: new Date().toISOString(),
+    garmentCount: garments.length,
+    garments,
+    wearLogs
+  };
+  
+  return JSON.stringify(exportData, null, 2);
+}
+
+// Import garments from JSON
+export async function importGarments(jsonData: string): Promise<{ imported: number, skipped: number }> {
+  try {
+    const data = JSON.parse(jsonData);
+    
+    if (!data.garments || !Array.isArray(data.garments)) {
+      throw new Error("Invalid import data format");
+    }
+    
+    let imported = 0;
+    let skipped = 0;
+    
+    for (const garment of data.garments) {
+      try {
+        // Check if garment already exists
+        const existing = await db.getFirstAsync<any>(
+          `SELECT id FROM garments WHERE id = ?`,
+          garment.id
+        );
+        
+        if (existing) {
+          skipped++;
+          continue;
+        }
+        
+        await addGarment(garment);
+        imported++;
+      } catch (error) {
+        console.error(`Failed to import garment ${garment.id}:`, error);
+        skipped++;
+      }
+    }
+    
+    // Import wear logs if present
+    if (data.wearLogs && Array.isArray(data.wearLogs)) {
+      for (const log of data.wearLogs) {
+        try {
+          await db.runAsync(
+            `INSERT OR IGNORE INTO wear_logs (id, garmentIds, wornAt, weather, dressCode) 
+             VALUES (?, ?, ?, ?, ?)`,
+            log.id,
+            log.garmentIds,
+            log.wornAt,
+            log.weather,
+            log.dressCode
+          );
+        } catch (error) {
+          console.error(`Failed to import wear log:`, error);
+        }
+      }
+    }
+    
+    return { imported, skipped };
+  } catch (error) {
+    throw new Error(`Import failed: ${error}`);
+  }
+}

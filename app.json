@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "match-wardrobe",
+    "name": "Closy",
     "slug": "match-wardrobe",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -13,7 +13,14 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bisratbelayneh.closy",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Closy needs access to your camera to take photos of your clothing items.",
+        "NSPhotoLibraryUsageDescription": "Closy needs access to your photo library to select photos of your clothing items.",
+        "NSLocationWhenInUseUsageDescription": "Closy needs your location to provide weather-based outfit suggestions."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -27,7 +34,19 @@
     },
     "plugins": [
       "expo-router",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Closy needs access to your photos to add clothing items to your digital closet."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Closy needs your location to provide weather-based outfit suggestions."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
