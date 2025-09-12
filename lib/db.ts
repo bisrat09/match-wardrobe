@@ -85,15 +85,29 @@ export async function updateWear(
 ) {
   const nowISO = new Date().toISOString();
   
-  // Update each garment's wear stats
+  // Update each garment's wear stats with smart dirty logic
   for (const id of garmentIds) {
+    // Get garment type to determine if it should get dirty
+    const garment = await db.getFirstAsync<{type: string, timesWorn: number}>(
+      'SELECT type, timesWorn FROM garments WHERE id = ?', 
+      id
+    );
+    
+    // Smart dirty logic: shoes don't get dirty on single wear, other items do
+    let shouldMarkDirty = 1;
+    if (garment?.type === 'shoe') {
+      // Shoes only get dirty after multiple wears or specific conditions
+      shouldMarkDirty = 0; // Keep shoes clean unless manually marked
+    }
+    
     await db.runAsync(
       `UPDATE garments 
        SET timesWorn = timesWorn + 1, 
            lastWornAt = ?,
-           isDirty = 1
+           isDirty = ?
        WHERE id = ?`,
       nowISO,
+      shouldMarkDirty,
       id
     );
   }
@@ -111,6 +125,23 @@ export async function updateWear(
   );
   
   return { success: true, logId };
+}
+
+export async function markAllGarmentsClean(): Promise<{success: boolean, count: number}> {
+  // Get count of dirty items first
+  const dirtyCount = await db.getFirstAsync<{count: number}>(
+    'SELECT COUNT(*) as count FROM garments WHERE isDirty = 1'
+  );
+  
+  // Mark all dirty garments as clean
+  await db.runAsync(
+    'UPDATE garments SET isDirty = 0 WHERE isDirty = 1'
+  );
+  
+  return { 
+    success: true, 
+    count: dirtyCount?.count ?? 0 
+  };
 }
 
 export async function updateGarment(id: string, updates: Partial<Omit<Garment, "id">>) {

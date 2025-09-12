@@ -34,7 +34,7 @@ export default function OutfitDetailScreen() {
       await updateWear(garmentIds, { weather, dressCode });
       Alert.alert(
         "Outfit Logged!", 
-        "This outfit has been marked as worn. Items are now marked as dirty.",
+        "This outfit has been marked as worn. Clothing items are marked as dirty (shoes stay clean).",
         [
           { text: "OK", onPress: () => router.push('/') }
         ]

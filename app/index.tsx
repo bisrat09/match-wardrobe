@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, ScrollView, Image, StyleSheet, Alert, TouchableOpacity, SafeAreaView, RefreshControl, ActivityIndicator } from "react-native";
+import { View, Text, ScrollView, StyleSheet, Alert, TouchableOpacity, SafeAreaView, RefreshControl, ActivityIndicator } from "react-native";
+import { Image } from "expo-image";
 import { router } from "expo-router";
 import { getAllGarments, updateWear } from "~/lib/db";
 import { suggestOutfits } from "~/lib/rules";
@@ -141,7 +142,7 @@ export default function TodayScreen() {
       await updateWear(garmentIds, { weather, dressCode });
       Alert.alert(
         "🎉 Outfit Worn!", 
-        "Great choice! Your outfit has been logged and items are now in your laundry basket.",
+        "Great choice! Your outfit has been logged. Clothing items are now in your laundry basket (shoes stay clean).",
         [
           { text: "Perfect!", onPress: () => load() }
         ]
@@ -316,7 +317,7 @@ function GarmentPreview({ label, uri }: { label: string; uri?: string }) {
   return (
     <View style={styles.garmentPreview}>
       {uri ? (
-        <Image source={{ uri }} style={styles.garmentImage} />
+        <Image source={{ uri }} style={styles.garmentImage} contentFit="cover" transition={200} />
       ) : (
         <View style={[styles.garmentImage, styles.garmentPlaceholder]} />
       )}

@@ -286,10 +286,24 @@ The color module implements:
 - **Data Protection**: Comprehensive backup/restore system to protect 200+ garments
 - **Button Optimization**: Refined action button sizing for better mobile experience
 
+#### Latest Session (2025-09-11)
+- **Multi-Select & Bulk Operations**: Added complete multi-select system for closet management
+  - Select button in closet header (toggles between "Select" and "Cancel")
+  - Visual checkmarks on selected items with overlay indicators
+  - "All"/"None" selection buttons for quick bulk selection
+  - Bulk delete functionality with confirmation dialog
+  - Smart dirty logic - shoes don't auto-mark dirty after wear
+  - Bulk clean feature - "🧺➜✨ Clean All (X)" button for dirty items
+- **Header Layout Improvements**: Restructured closet header into proper three-column layout
+  - Left: "← Today" navigation
+  - Center: "Closet" title (properly centered)
+  - Right: "Select" and "+ Add" buttons (right-aligned)
+  - Fixed Select button visibility issues on all screen sizes
+
 ### 🎯 Where We Are Now
-**Date**: September 10, 2025  
-**Status**: Production-Ready iOS App with Modern Design  
-**Last Action**: Completed UX polish and TestFlight preparation  
+**Date**: September 11, 2025  
+**Status**: Production-Ready iOS App with Complete Bulk Management  
+**Last Action**: Added multi-select functionality and fixed header layout  
 
 The app now includes:
 - ✅ **TestFlight Ready**: Complete iOS build configuration with bundle ID and certificates
@@ -308,10 +322,23 @@ The app now includes:
 - ✅ Comprehensive 20-color palette including pink, orange, purple, etc.
 - ✅ Fixed shuffle functionality - individual shuffles with full garment rotation
 - ✅ Mobile-optimized interface with proper touch targets
+- ✅ **Multi-Select System**: Complete bulk operations for closet management
+- ✅ **Bulk Delete**: Select multiple items and delete with confirmation
+- ✅ **Bulk Clean**: One-click cleaning of all dirty items
+- ✅ **Smart Dirty Logic**: Shoes don't auto-mark dirty after wear
+- ✅ **Improved Header Layout**: Fixed Select button visibility on all screens
 
 ### 📋 Next Development Priorities
 
-#### Completed This Session ✅
+#### Completed This Session ✅  
+- ~~Multi-select system for closet management~~
+- ~~Bulk delete functionality with confirmation dialogs~~
+- ~~Bulk clean feature for dirty items~~
+- ~~Smart dirty logic - shoes don't get dirty after wear~~
+- ~~Header layout improvements with proper three-column structure~~
+- ~~Fixed Select button visibility on all screen sizes~~
+
+#### Previously Completed ✅
 - ~~iOS TestFlight preparation and configuration~~
 - ~~App rebranding to "Closy" with new bundle ID~~
 - ~~Complete UI redesign with burnt orange theme~~
@@ -366,6 +393,7 @@ The app now includes:
 - **Database**: SQLite with 200+ garments, backup/restore system in place
 - **Pull-to-Refresh**: Implemented on all screens for smooth development workflow
 - **Professional UX**: Loading states, error handling, and polished interactions
+- **Bulk Management**: Complete multi-select system with delete and clean operations
 - **Git Workflow**: Use feature branches for new features
 
 ### 🔧 Quick Start Commands
@@ -373,15 +401,16 @@ The app now includes:
 cd /Users/bisratbelayneh/Documents/match-wardrobe
 npx expo start                    # Start development server (with pull-to-refresh!)
 git status                       # Check working directory 
-git checkout -b feature/batch-operations  # Create feature branch
+git checkout -b feature/onboarding  # Create feature branch for next features
 npx tsc --noEmit                 # Verify TypeScript compilation
 ```
 
-### 🎯 Current App State (September 10, 2025)
-- **Status**: Production-ready iOS app with modern design
+### 🎯 Current App State (September 11, 2025)
+- **Status**: Production-ready iOS app with complete bulk management
 - **Theme**: Professional burnt orange (#EA580C) with cohesive UX
 - **Data**: 200+ garments safely stored with backup/restore system
 - **Features**: Complete outfit suggestion engine with weather integration
-- **Next**: Ready for TestFlight beta testing and advanced features
+- **Bulk Operations**: Multi-select, bulk delete, bulk clean, smart dirty logic
+- **Next**: Ready for TestFlight beta testing and onboarding flow
 
-**Ready for the next level! 🚀🧡**
+**Ready for the next level with powerful bulk management! 🚀🧡**

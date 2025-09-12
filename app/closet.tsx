@@ -4,7 +4,6 @@ import {
   Text, 
   TextInput, 
   TouchableOpacity, 
-  Image, 
   FlatList, 
   Dimensions, 
   StyleSheet, 
@@ -15,10 +14,12 @@ import {
   RefreshControl,
   ActivityIndicator 
 } from "react-native";
+import { Image } from "expo-image";
 import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import { addGarment, getAllGarments, updateGarment, deleteGarment } from "~/lib/db";
+import { addGarment, getAllGarments, updateGarment, deleteGarment, markAllGarmentsClean } from "~/lib/db";
 import type { Garment, ClothingType, DressCode, Warmth } from "~/lib/types";
+import GarmentCard from "~/components/GarmentCard";
 
 // Color palette - Burnt Orange Theme
 const colors = {
@@ -80,6 +81,10 @@ export default function ClosetScreen() {
   const [filterType, setFilterType] = useState<ClothingType | "all">("all");
   const [filterDressCode, setFilterDressCode] = useState<DressCode | "all">("all");
   const [showDirtyOnly, setShowDirtyOnly] = useState(false);
+  
+  // Multi-select state
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   
   // Form state
   const [garmentType, setGarmentType] = useState<ClothingType>("top");
@@ -226,6 +231,108 @@ export default function ClosetScreen() {
     await load();
   };
 
+  const handleBulkClean = async () => {
+    const dirtyCount = items.filter(item => item.isDirty).length;
+    
+    if (dirtyCount === 0) {
+      Alert.alert("No Dirty Items", "All your garments are already clean!");
+      return;
+    }
+
+    Alert.alert(
+      "Clean All Dirty Items",
+      `This will mark all ${dirtyCount} dirty items as clean and make them available for outfit selection. Continue?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: `Clean ${dirtyCount} Items`,
+          style: "default",
+          onPress: async () => {
+            try {
+              const result = await markAllGarmentsClean();
+              await load(); // Refresh the list
+              Alert.alert(
+                "✨ All Clean!",
+                `Successfully cleaned ${result.count} items. They're now available for your outfits!`,
+                [{ text: "Perfect!", style: "default" }]
+              );
+            } catch (error) {
+              Alert.alert("Error", "Failed to clean items. Please try again.");
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const toggleMultiSelectMode = () => {
+    setIsMultiSelectMode(!isMultiSelectMode);
+    setSelectedItems(new Set()); // Clear selection when toggling mode
+  };
+
+  const toggleItemSelection = (itemId: string) => {
+    const newSelection = new Set(selectedItems);
+    if (newSelection.has(itemId)) {
+      newSelection.delete(itemId);
+    } else {
+      newSelection.add(itemId);
+    }
+    setSelectedItems(newSelection);
+  };
+
+  const selectAllItems = () => {
+    const allIds = new Set(filteredItems.map(item => item.id));
+    setSelectedItems(allIds);
+  };
+
+  const clearSelection = () => {
+    setSelectedItems(new Set());
+  };
+
+  const handleBulkDelete = async () => {
+    const selectedCount = selectedItems.size;
+    
+    if (selectedCount === 0) {
+      Alert.alert("No Items Selected", "Please select items to delete first.");
+      return;
+    }
+
+    Alert.alert(
+      "Delete Multiple Items",
+      `Are you sure you want to permanently delete ${selectedCount} selected ${selectedCount === 1 ? 'item' : 'items'}? This action cannot be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: `Delete ${selectedCount} Items`,
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // Delete all selected items
+              for (const itemId of selectedItems) {
+                await deleteGarment(itemId);
+              }
+              
+              // Clear selection and exit multi-select mode
+              setSelectedItems(new Set());
+              setIsMultiSelectMode(false);
+              
+              // Refresh the list
+              await load();
+              
+              Alert.alert(
+                "Items Deleted",
+                `Successfully deleted ${selectedCount} ${selectedCount === 1 ? 'item' : 'items'}.`,
+                [{ text: "OK", style: "default" }]
+              );
+            } catch (error) {
+              Alert.alert("Error", "Failed to delete some items. Please try again.");
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const resetForm = () => {
     setGarmentType("top");
     setSelectedColors(["black"]);
@@ -264,13 +371,30 @@ export default function ClosetScreen() {
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.push('/')}>
-            <Text style={styles.navLink}>← Today</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>Closet</Text>
-          <TouchableOpacity onPress={openImagePicker}>
-            <Text style={styles.navLink}>＋ Add</Text>
-          </TouchableOpacity>
+          <View style={styles.headerLeft}>
+            <TouchableOpacity onPress={() => router.push('/')}>
+              <Text style={styles.navLink}>← Today</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.headerCenter}>
+            <Text style={styles.title}>Closet</Text>
+          </View>
+          <View style={styles.headerActions}>
+            <TouchableOpacity 
+              onPress={toggleMultiSelectMode}
+              style={styles.selectButton}
+              testID="select-button"
+            >
+              <Text style={[styles.navLink, isMultiSelectMode && styles.activeNavLink]}>
+                {isMultiSelectMode ? "Cancel" : "Select"}
+              </Text>
+            </TouchableOpacity>
+            {!isMultiSelectMode && (
+              <TouchableOpacity onPress={openImagePicker}>
+                <Text style={styles.navLink}>＋ Add</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </View>
 
         {/* Search Bar */}
@@ -310,11 +434,49 @@ export default function ClosetScreen() {
           </View>
         </ScrollView>
 
-        {/* Results Count */}
+        {/* Results Count & Bulk Actions */}
         <View style={styles.countRow}>
           <Text style={styles.countText}>
-            {filteredItems.length} of {items.length} items
+            {isMultiSelectMode 
+              ? `${selectedItems.size} selected of ${filteredItems.length} items`
+              : `${filteredItems.length} of ${items.length} items`
+            }
           </Text>
+          {isMultiSelectMode ? (
+            <View style={styles.multiSelectActions}>
+              <TouchableOpacity 
+                style={styles.selectAllButton} 
+                onPress={selectAllItems}
+              >
+                <Text style={styles.selectAllText}>All</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.clearButton} 
+                onPress={clearSelection}
+              >
+                <Text style={styles.clearText}>None</Text>
+              </TouchableOpacity>
+              {selectedItems.size > 0 && (
+                <TouchableOpacity 
+                  style={styles.multiDeleteButton} 
+                  onPress={handleBulkDelete}
+                >
+                  <Text style={styles.multiDeleteText}>🗑️ Delete ({selectedItems.size})</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ) : (
+            items.filter(item => item.isDirty).length > 0 && (
+              <TouchableOpacity 
+                style={styles.bulkCleanButton} 
+                onPress={handleBulkClean}
+              >
+                <Text style={styles.bulkCleanText}>
+                  🧺➜✨ Clean All ({items.filter(item => item.isDirty).length})
+                </Text>
+              </TouchableOpacity>
+            )
+          )}
         </View>
 
         {/* Grid */}
@@ -332,28 +494,44 @@ export default function ClosetScreen() {
               tintColor={colors.primary}
             />
           }
+          // Performance optimizations
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          initialNumToRender={20}
+          windowSize={10}
           renderItem={({ item }) => (
             <TouchableOpacity
-              onLongPress={() => handleEdit(item)}
-              activeOpacity={0.9}
+              onPress={() => {
+                if (isMultiSelectMode) {
+                  toggleItemSelection(item.id);
+                } else {
+                  handleEdit(item);
+                }
+              }}
+              onLongPress={() => {
+                if (!isMultiSelectMode) {
+                  handleEdit(item);
+                }
+              }}
               style={[
-                styles.card,
-                item.isDirty && styles.dirtyCard
+                styles.garmentWrapper,
+                isMultiSelectMode && selectedItems.has(item.id) && styles.selectedGarment
               ]}
             >
-              <Image source={{ uri: item.imageUri }} style={styles.cardImage} />
-              <View style={styles.cardContent}>
-                <Text style={styles.cardTitle}>
-                  {(item.name || item.type).toLowerCase()}
-                </Text>
-                <Text style={styles.cardMeta}>
-                  {item.colors.join(", ")} • w{item.warmth}
-                </Text>
-                <Text style={styles.editHint}>Long press to edit</Text>
-              </View>
-              {item.isDirty && (
-                <View style={styles.dirtyBadge}>
-                  <Text style={styles.dirtyText}>Dirty</Text>
+              <GarmentCard 
+                garment={item} 
+                onLongPress={() => !isMultiSelectMode && handleEdit(item)}
+              />
+              {isMultiSelectMode && (
+                <View style={styles.selectionOverlay}>
+                  <View style={[
+                    styles.selectionCheckbox,
+                    selectedItems.has(item.id) && styles.selectedCheckbox
+                  ]}>
+                    {selectedItems.has(item.id) && (
+                      <Text style={styles.selectionCheckmark}>✓</Text>
+                    )}
+                  </View>
                 </View>
               )}
             </TouchableOpacity>
@@ -596,6 +774,25 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     fontSize: 16,
   },
+  activeNavLink: {
+    color: colors.danger,
+  },
+  headerLeft: {
+    flex: 1,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: "center",
+  },
+  headerActions: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+  },
+  selectButton: {
+    marginRight: 12,
+  },
   
   // Search
   searchContainer: {
@@ -678,69 +875,100 @@ const styles = StyleSheet.create({
   countRow: {
     paddingHorizontal: 16,
     paddingBottom: 8,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
   countText: {
     fontSize: 13,
     color: colors.lightText,
   },
-  
-  // Cards
-  card: {
-    width: CARD_WIDTH,
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    overflow: "hidden",
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
+  bulkCleanButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    flexShrink: 1,
   },
-  dirtyCard: {
-    backgroundColor: colors.dirtyBg,
-    borderWidth: 1,
-    borderColor: colors.dirtyBorder,
-  },
-  cardImage: {
-    width: "100%",
-    height: CARD_WIDTH,
-    backgroundColor: colors.secondary,
-  },
-  cardContent: {
-    padding: 12,
-  },
-  cardTitle: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.text,
-    marginBottom: 4,
-  },
-  cardMeta: {
+  bulkCleanText: {
     fontSize: 12,
-    color: colors.lightText,
-    marginBottom: 4,
+    color: colors.card,
+    fontWeight: "600",
   },
-  editHint: {
+  multiSelectActions: {
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+  },
+  selectAllButton: {
+    backgroundColor: colors.secondary,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  selectAllText: {
     fontSize: 11,
-    color: colors.accent,
-    fontStyle: "italic",
+    color: colors.text,
+    fontWeight: "600",
   },
-  dirtyBadge: {
+  clearButton: {
+    backgroundColor: colors.secondary,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  clearText: {
+    fontSize: 11,
+    color: colors.text,
+    fontWeight: "600",
+  },
+  multiDeleteButton: {
+    backgroundColor: colors.danger,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  multiDeleteText: {
+    fontSize: 11,
+    color: colors.card,
+    fontWeight: "600",
+  },
+  
+  // Multi-select visual feedback
+  garmentWrapper: {
+    position: "relative",
+  },
+  selectedGarment: {
+    transform: [{ scale: 0.95 }],
+    opacity: 0.8,
+  },
+  selectionOverlay: {
     position: "absolute",
     top: 8,
     right: 8,
-    backgroundColor: "#FEE2E2",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: colors.dirtyBorder,
+    zIndex: 10,
   },
-  dirtyText: {
-    color: colors.danger,
-    fontSize: 11,
-    fontWeight: "700",
+  selectionCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: colors.card,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    alignItems: "center",
+    justifyContent: "center",
   },
+  selectedCheckbox: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  selectionCheckmark: {
+    color: colors.card,
+    fontSize: 14,
+    fontWeight: "bold",
+  },
+  
+  // Cards (styles moved to GarmentCard component)
   
   // Empty State
   emptyState: {

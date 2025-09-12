@@ -1,10 +1,11 @@
-import React from "react";
-import { View, Text, Alert, ScrollView, TouchableOpacity, SafeAreaView, StyleSheet } from "react-native";
+import React, { useState } from "react";
+import { View, Text, Alert, ScrollView, TouchableOpacity, SafeAreaView, StyleSheet, ActivityIndicator } from "react-native";
 import { router } from "expo-router";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import * as DocumentPicker from "expo-document-picker";
 import * as Sharing from "expo-sharing";
-import { clearAllGarments, updateAllGarmentsWithMultipleDressCodes, exportGarments, importGarments } from "~/lib/db";
+import * as ImagePicker from "expo-image-picker";
+import { clearAllGarments, updateAllGarmentsWithMultipleDressCodes, exportGarments, importGarments, getAllGarments, updateGarment } from "~/lib/db";
 
 // Color palette - Burnt Orange Theme
 const colors = {
@@ -21,6 +22,8 @@ const colors = {
 };
 
 export default function SettingsScreen() {
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const handleClearAll = () => {
     Alert.alert(
       "Clear All Garments",
@@ -97,6 +100,67 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleBatchImageImport = async () => {
+    try {
+      // Get all garments without images
+      const garments = await getAllGarments();
+      const garmentsWithoutImages = garments.filter(g => !g.imageUri || g.imageUri === "");
+      
+      if (garmentsWithoutImages.length === 0) {
+        Alert.alert("No garments need images", "All your garments already have images.");
+        return;
+      }
+
+      Alert.alert(
+        "Batch Import Images",
+        `Found ${garmentsWithoutImages.length} garments without images.\n\nYou can select multiple photos at once (up to 100 on iOS).\n\nPhotos will be assigned to garments in order.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Select Photos",
+            onPress: async () => {
+              setImporting(true);
+              setImportProgress({ current: 0, total: garmentsWithoutImages.length });
+              
+              try {
+                const result = await ImagePicker.launchImageLibraryAsync({
+                  mediaTypes: ['images'],
+                  allowsMultipleSelection: true,
+                  quality: 0.8,
+                  selectionLimit: Math.min(garmentsWithoutImages.length, 100)
+                });
+
+                if (!result.canceled && result.assets) {
+                  const numPhotos = result.assets.length;
+                  const numToUpdate = Math.min(numPhotos, garmentsWithoutImages.length);
+                  
+                  for (let i = 0; i < numToUpdate; i++) {
+                    setImportProgress({ current: i + 1, total: numToUpdate });
+                    await updateGarment(garmentsWithoutImages[i].id, {
+                      imageUri: result.assets[i].uri
+                    });
+                  }
+                  
+                  Alert.alert(
+                    "✅ Import Complete",
+                    `Successfully added ${numToUpdate} images to your garments.${numToUpdate < garmentsWithoutImages.length ? `\n\n${garmentsWithoutImages.length - numToUpdate} garments still need images.` : ''}`
+                  );
+                }
+              } catch (error: any) {
+                Alert.alert("Error", error?.message ?? "Failed to import images");
+              } finally {
+                setImporting(false);
+                setImportProgress({ current: 0, total: 0 });
+              }
+            }
+          }
+        ]
+      );
+    } catch (error: any) {
+      Alert.alert("Error", error?.message ?? "Failed to check garments");
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       {/* Header */}
@@ -141,6 +205,23 @@ export default function SettingsScreen() {
             <TouchableOpacity style={styles.secondaryButton} onPress={handleImport}>
               <Text style={styles.secondaryButtonText}>📥 Import Wardrobe</Text>
             </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.primaryButton, { backgroundColor: colors.primary }]} 
+              onPress={handleBatchImageImport}
+              disabled={importing}
+            >
+              {importing ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryButtonText}>
+                    {importProgress.current}/{importProgress.total} Images...
+                  </Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryButtonText}>🖼️ Batch Add Images</Text>
+              )}
+            </TouchableOpacity>
           </View>
           
           <Text style={styles.helpText}>
@@ -158,6 +239,54 @@ export default function SettingsScreen() {
           <View style={styles.buttonGroup}>
             <TouchableOpacity style={styles.primaryButton} onPress={handleUpdateDressCodes}>
               <Text style={styles.primaryButtonText}>🔄 Fix Dress Codes</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.primaryButton} onPress={() => {
+              Alert.alert(
+                "Manual Category Review",
+                "To fix categories manually:\n\n1. Go to Closet screen\n2. Use the Type filter to see items by category\n3. Long-press any item to edit and change its type\n\nThis gives you full control over categorization instead of unreliable auto-detection.",
+                [
+                  { text: "Got it", style: "default" },
+                  { 
+                    text: "Go to Closet", 
+                    onPress: () => router.push('/closet')
+                  }
+                ]
+              );
+            }}>
+              <Text style={styles.primaryButtonText}>👔 Manual Category Review</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.primaryButton} onPress={async () => {
+              Alert.alert(
+                "Image Migration Required",
+                "Your images were stored in the old Expo cache which is no longer accessible after the upgrade. You have two options:\n\n1. Re-add images manually from your photo library\n2. Clear all garments and start fresh",
+                [
+                  { text: "Cancel", style: "cancel" },
+                  { 
+                    text: "Clear Images Only", 
+                    onPress: async () => {
+                      const { getAllGarments, updateGarment } = await import("~/lib/db");
+                      const garments = await getAllGarments();
+                      let cleared = 0;
+                      for (const g of garments) {
+                        if (g.imageUri) {
+                          await updateGarment(g.id, { imageUri: "" });
+                          cleared++;
+                        }
+                      }
+                      Alert.alert("Images Cleared", `Removed ${cleared} broken image references. You can now re-add photos from your library.`);
+                    }
+                  },
+                  { 
+                    text: "Clear All Data", 
+                    style: "destructive",
+                    onPress: handleClearAll
+                  }
+                ]
+              );
+            }}>
+              <Text style={styles.primaryButtonText}>🔧 Fix Broken Images</Text>
             </TouchableOpacity>
             
             <TouchableOpacity style={[styles.dangerButton]} onPress={handleClearAll}>
