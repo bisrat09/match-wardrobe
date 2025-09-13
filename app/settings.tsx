@@ -6,6 +6,11 @@ import * as DocumentPicker from "expo-document-picker";
 import * as Sharing from "expo-sharing";
 import * as ImagePicker from "expo-image-picker";
 import { clearAllGarments, updateAllGarmentsWithMultipleDressCodes, exportGarments, importGarments, getAllGarments, updateGarment } from "~/lib/db";
+import { suggestOutfits } from "~/lib/rules";
+import { getImagesDirectoryInfo } from "~/lib/imageStorage";
+import { migrateAllImages } from "~/lib/imageMigration";
+import { getBackupStatus, createAutoBackup, restoreFromLatestBackup } from "~/lib/autoBackup";
+import { performImageHealthCheck } from "~/lib/imageHealthCheck";
 
 // Color palette - Burnt Orange Theme
 const colors = {
@@ -24,6 +29,71 @@ const colors = {
 export default function SettingsScreen() {
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  const [imageStorageInfo, setImageStorageInfo] = useState<any>(null);
+  const [migrating, setMigrating] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<any>(null);
+  const [healthChecking, setHealthChecking] = useState(false);
+  
+  const loadImageStorageInfo = async () => {
+    const info = await getImagesDirectoryInfo();
+    setImageStorageInfo(info);
+  };
+  
+  const loadBackupStatus = async () => {
+    const status = await getBackupStatus();
+    setBackupStatus(status);
+  };
+  
+  const handleCreateBackup = async () => {
+    setMigrating(true);
+    try {
+      const result = await createAutoBackup();
+      if (result.success) {
+        Alert.alert("Backup Created", "Your wardrobe has been backed up successfully.");
+        await loadBackupStatus();
+      } else {
+        Alert.alert("Backup Failed", result.error || "Unknown error");
+      }
+    } catch (error) {
+      Alert.alert("Error", "Failed to create backup");
+    } finally {
+      setMigrating(false);
+    }
+  };
+  
+  const handleHealthCheck = async () => {
+    setHealthChecking(true);
+    try {
+      const result = await performImageHealthCheck(false); // Show results
+      await loadImageStorageInfo();
+    } catch (error) {
+      Alert.alert("Error", "Health check failed");
+    } finally {
+      setHealthChecking(false);
+    }
+  };
+  
+  const handleMigrateImages = async () => {
+    setMigrating(true);
+    try {
+      const result = await migrateAllImages();
+      Alert.alert(
+        "Image Migration",
+        result.message,
+        [{ text: "OK", onPress: loadImageStorageInfo }]
+      );
+    } catch (error) {
+      Alert.alert("Error", "Failed to migrate images");
+    } finally {
+      setMigrating(false);
+    }
+  };
+  
+  React.useEffect(() => {
+    loadImageStorageInfo();
+    loadBackupStatus();
+  }, []);
+  
   const handleClearAll = () => {
     Alert.alert(
       "Clear All Garments",
@@ -229,6 +299,97 @@ export default function SettingsScreen() {
           </Text>
         </View>
 
+        {/* Automatic Backup */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🛡️ Automatic Protection</Text>
+          <Text style={styles.cardDescription}>
+            Your wardrobe is automatically backed up daily and protected from data loss.
+          </Text>
+          
+          {backupStatus && (
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>
+                📦 {backupStatus.backupCount} backups kept
+              </Text>
+              {backupStatus.lastBackupDate && (
+                <Text style={styles.infoText}>
+                  🕒 Last backup: {new Date(backupStatus.lastBackupDate).toLocaleDateString()}
+                </Text>
+              )}
+              <Text style={styles.infoText}>
+                💾 {(backupStatus.totalSize / 1024).toFixed(1)} KB used
+              </Text>
+            </View>
+          )}
+          
+          <View style={styles.buttonGroup}>
+            <TouchableOpacity 
+              style={[styles.primaryButton, { backgroundColor: colors.success }]} 
+              onPress={handleCreateBackup}
+              disabled={migrating}
+            >
+              {migrating ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <Text style={styles.primaryButtonText}>📦 Create Backup Now</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+          
+          <Text style={styles.helpText}>
+            Automatic daily backups ensure you never lose your wardrobe data. No manual action needed!
+          </Text>
+        </View>
+
+        {/* Image Storage */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🖼️ Image Storage</Text>
+          <Text style={styles.cardDescription}>
+            Your images are now saved in persistent storage that won't be lost during app updates.
+          </Text>
+          
+          {imageStorageInfo && (
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>
+                📁 {imageStorageInfo.fileCount} images stored
+              </Text>
+              <Text style={styles.infoText}>
+                💾 {imageStorageInfo.totalSizeMB} MB used
+              </Text>
+            </View>
+          )}
+          
+          <View style={styles.buttonGroup}>
+            <TouchableOpacity 
+              style={[styles.primaryButton, { backgroundColor: colors.primary }]} 
+              onPress={handleHealthCheck}
+              disabled={healthChecking}
+            >
+              {healthChecking ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <Text style={styles.primaryButtonText}>🏥 Health Check & Repair</Text>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.secondaryButton, { borderColor: colors.primary }]} 
+              onPress={handleMigrateImages}
+              disabled={migrating}
+            >
+              {migrating ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>🔄 Migrate Cache</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+          
+          <Text style={styles.helpText}>
+            This ensures all your garment images are safely stored and won't be lost when the app updates.
+          </Text>
+        </View>
+
         {/* Development Tools */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>🔧 Developer Tools</Text>
@@ -255,6 +416,77 @@ export default function SettingsScreen() {
               );
             }}>
               <Text style={styles.primaryButtonText}>👔 Manual Category Review</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.primaryButton} onPress={async () => {
+              try {
+                const garments = await getAllGarments();
+                const weather = { tempC: 20, chanceOfRain: 0.1, windKph: 8, isSnow: false };
+                
+                // Simulate the exact filtering logic from the outfit algorithm
+                let pool = garments.filter(g => !g.isDirty);
+                pool = pool.filter(g => g.dressCodes.includes("casual"));
+                
+                // Check warmth filtering (byTypeWarmth logic)
+                const topWarmth = 1; // For 20°C weather
+                const shoeWarmth = 1;
+                
+                const allTops = pool.filter(g => g.type === "top");
+                const filteredTops = allTops.filter(g => Math.abs((g.warmth ?? 2) - topWarmth) <= 1);
+                
+                const allShoes = pool.filter(g => g.type === "shoe");
+                const filteredShoes = allShoes.filter(g => Math.abs((g.warmth ?? 2) - shoeWarmth) <= 1);
+                
+                // Find the specific sweatshirt
+                const sweatshirts = garments.filter(g => 
+                  g.name?.toLowerCase().includes('sweatshirt') || 
+                  (g.colors.includes('maroon') && g.type === 'top')
+                );
+                
+                let debugInfo = "=== DETAILED FILTERING DEBUG ===\n\n";
+                debugInfo += `All garments: ${garments.length}\n`;
+                debugInfo += `Clean garments: ${garments.filter(g => !g.isDirty).length}\n`;
+                debugInfo += `Casual dress code: ${pool.length}\n\n`;
+                
+                debugInfo += `ALL TOPS (${allTops.length}):\n`;
+                allTops.forEach(g => {
+                  debugInfo += `- "${g.name || 'unnamed'}" warmth:${g.warmth} (${g.colors.join(', ')})\n`;
+                });
+                
+                debugInfo += `\nFILTERED TOPS for warmth ${topWarmth} (${filteredTops.length}):\n`;
+                filteredTops.forEach(g => {
+                  debugInfo += `- "${g.name || 'unnamed'}" warmth:${g.warmth} (${g.colors.join(', ')})\n`;
+                });
+                
+                debugInfo += `\nALL SHOES (${allShoes.length}):\n`;
+                allShoes.forEach(g => {
+                  debugInfo += `- "${g.name || 'unnamed'}" warmth:${g.warmth} (${g.colors.join(', ')})\n`;
+                });
+                
+                debugInfo += `\nFILTERED SHOES for warmth ${shoeWarmth} (${filteredShoes.length}):\n`;
+                filteredShoes.forEach(g => {
+                  debugInfo += `- "${g.name || 'unnamed'}" warmth:${g.warmth} (${g.colors.join(', ')})\n`;
+                });
+                
+                if (sweatshirts.length > 0) {
+                  debugInfo += `\nSWEATSHIRT/MAROON DETAILS:\n`;
+                  sweatshirts.forEach(g => {
+                    debugInfo += `- Type: ${g.type}\n`;
+                    debugInfo += `- Name: "${g.name || 'unnamed'}"\n`;
+                    debugInfo += `- Colors: ${g.colors.join(', ')}\n`;
+                    debugInfo += `- Warmth: ${g.warmth}\n`;
+                    debugInfo += `- Dirty: ${g.isDirty}\n`;
+                    debugInfo += `- Dress codes: ${g.dressCodes.join(', ')}\n`;
+                  });
+                }
+                
+                Alert.alert("Detailed Debug", debugInfo);
+                
+              } catch (error: any) {
+                Alert.alert("Debug Error", error?.message || "Failed to debug filtering");
+              }
+            }}>
+              <Text style={styles.primaryButtonText}>🔍 Deep Debug Filtering</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.primaryButton} onPress={async () => {
@@ -475,6 +707,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.lightText,
     fontStyle: "italic",
+  },
+  
+  infoBox: {
+    backgroundColor: colors.secondary,
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  
+  infoText: {
+    fontSize: 14,
+    color: colors.text,
+    marginVertical: 2,
   },
   
   // Feature List

@@ -20,6 +20,10 @@ import * as ImagePicker from "expo-image-picker";
 import { addGarment, getAllGarments, updateGarment, deleteGarment, markAllGarmentsClean } from "~/lib/db";
 import type { Garment, ClothingType, DressCode, Warmth } from "~/lib/types";
 import GarmentCard from "~/components/GarmentCard";
+import { saveImagePersistently, deletePersistedImage } from "~/lib/imageStorage";
+import { migrateAllImages } from "~/lib/imageMigration";
+import { checkAndCreateBackup } from "~/lib/autoBackup";
+import { performImageHealthCheck } from "~/lib/imageHealthCheck";
 
 // Color palette - Burnt Orange Theme
 const colors = {
@@ -101,6 +105,28 @@ export default function ClosetScreen() {
     }
     
     try {
+      // Run maintenance tasks on first load only
+      if (!isRefreshing && items.length === 0) {
+        // 1. Create automatic backup
+        await checkAndCreateBackup();
+        
+        // 2. Run image health check
+        const healthCheck = await performImageHealthCheck(true); // Silent mode
+        if (healthCheck.missingImages > 0 || healthCheck.repairedImages > 0) {
+          console.log(`Health check: ${healthCheck.repairedImages} repaired, ${healthCheck.missingImages} missing`);
+        }
+        
+        // 3. Run migration if needed
+        const migrationResult = await migrateAllImages();
+        if (migrationResult.failedCount > 0) {
+          Alert.alert(
+            "Image Recovery",
+            migrationResult.message,
+            [{ text: "OK" }]
+          );
+        }
+      }
+      
       const garments = await getAllGarments();
       setItems(garments);
     } catch (error: any) {
@@ -151,18 +177,37 @@ export default function ClosetScreen() {
     
     setBusy(true);
     try {
+      let finalImageUri: string;
+      
       if (editingGarment) {
+        // Handle image for editing
+        if (selectedImage) {
+          // User selected a new image - save it persistently
+          finalImageUri = await saveImagePersistently(selectedImage);
+          // Delete the old image if it was in our managed storage
+          if (editingGarment.imageUri !== selectedImage) {
+            await deletePersistedImage(editingGarment.imageUri);
+          }
+        } else {
+          // Keep the existing image
+          finalImageUri = editingGarment.imageUri;
+        }
+        
         await updateGarment(editingGarment.id, {
-          ...editingGarment,
           type: garmentType,
           name: garmentName || undefined,
           colors: selectedColors,
           warmth,
           waterResistant,
           dressCodes,
-          imageUri: selectedImage || editingGarment.imageUri
+          imageUri: finalImageUri,
+          // Don't update these fields - keep existing values
+          // isDirty, favorite, lastWornAt, timesWorn are not being edited
         });
       } else {
+        // Handle image for new garment - save persistently
+        finalImageUri = await saveImagePersistently(selectedImage);
+        
         await addGarment({
           type: garmentType,
           name: garmentName || undefined,
@@ -170,7 +215,7 @@ export default function ClosetScreen() {
           warmth,
           waterResistant,
           dressCodes,
-          imageUri: selectedImage,
+          imageUri: finalImageUri,
           lastWornAt: undefined,
           timesWorn: 0,
           isDirty: false,
@@ -204,7 +249,7 @@ export default function ClosetScreen() {
     setWarmth(garment.warmth);
     setWaterResistant(garment.waterResistant);
     setDressCodes(garment.dressCodes);
-    setSelectedImage("");
+    setSelectedImage(null as any); // Use null instead of empty string to preserve original image
     setShowModal(true);
   };
 
@@ -218,6 +263,9 @@ export default function ClosetScreen() {
           text: "Delete", 
           style: "destructive",
           onPress: async () => {
+            // Delete the persisted image file
+            await deletePersistedImage(garment.imageUri);
+            // Delete from database
             await deleteGarment(garment.id);
             await load();
           }
@@ -340,7 +388,7 @@ export default function ClosetScreen() {
     setWaterResistant(0);
     setDressCodes(["casual"]);
     setGarmentName("");
-    setSelectedImage("");
+    setSelectedImage(null as any);
     setEditingGarment(null);
   };
 
@@ -560,9 +608,25 @@ export default function ClosetScreen() {
               </View>
 
               {selectedImage ? (
-                <Image source={{ uri: selectedImage }} style={styles.modalImage} />
+                <View style={{ position: 'relative' }}>
+                  <Image source={{ uri: selectedImage }} style={styles.modalImage} />
+                  <TouchableOpacity 
+                    style={styles.removeImageButton}
+                    onPress={() => setSelectedImage(null as any)}
+                  >
+                    <Text style={styles.removeImageText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
               ) : editingGarment ? (
-                <Image source={{ uri: editingGarment.imageUri }} style={styles.modalImage} />
+                <View style={{ position: 'relative' }}>
+                  <Image source={{ uri: editingGarment.imageUri }} style={styles.modalImage} />
+                  <TouchableOpacity 
+                    style={styles.replaceImageButton}
+                    onPress={openImagePicker}
+                  >
+                    <Text style={styles.replaceImageText}>Replace Image</Text>
+                  </TouchableOpacity>
+                </View>
               ) : null}
 
               <TextInput
@@ -1015,6 +1079,36 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: colors.secondary,
     marginBottom: 20,
+  },
+  replaceImageButton: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  replaceImageText: {
+    color: colors.card,
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  removeImageButton: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeImageText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   modalInput: {
     backgroundColor: colors.card,

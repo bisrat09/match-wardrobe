@@ -25,14 +25,15 @@ export default React.memo(function GarmentCard({ garment, onLongPress, onPress }
       delayLongPress={500}
       activeOpacity={0.7}
     >
-      {garment.imageUri && !imageError ? (
+      {garment.imageUri && garment.imageUri.trim() !== '' && !imageError ? (
         <Image 
           source={{ uri: garment.imageUri }} 
           style={styles.img}
           contentFit="cover"
           transition={200}
-          onError={() => setImageError(true)}
-          // Silent error handling
+          onError={() => {
+            setImageError(true);
+          }}
         />
       ) : (
         <View style={[styles.img, styles.placeholder]}>

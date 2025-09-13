@@ -64,9 +64,16 @@ function notWornRecently(g: Garment, nowISO: string, days: number) {
 }
 
 function byTypeWarmth(pool: Garment[], type: Garment["type"], target: number) {
-  const win = 1;
-  return pool
-    .filter(g => g.type === type)
+  const filtered = pool.filter(g => g.type === type);
+  
+  // No warmth filtering for shoes - any shoe works with any weather
+  if (type === "shoe") {
+    return filtered.sort((a,b) => (a.timesWorn ?? 0) - (b.timesWorn ?? 0));
+  }
+  
+  // Flexible warmth tolerance for tops and bottoms, strict for outerwear
+  const win = type === "outerwear" ? 1 : 2;
+  return filtered
     .filter(g => Math.abs((g.warmth ?? 2) - target) <= win)
     .sort((a,b) => (a.timesWorn ?? 0) - (b.timesWorn ?? 0));
 }
