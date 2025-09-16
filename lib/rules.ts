@@ -27,21 +27,105 @@ export function suggestOutfits(
     return [];
   }
 
-  const candidates: (Garment|null)[][] = [];
-  for (const top of tops) for (const bottom of bottoms) for (const shoe of shoes) {
-    if (outers[0] === null) candidates.push([top,bottom,null,shoe]);
-    else for (const outer of outers) candidates.push([top,bottom,outer!,shoe]);
+  // Generate diverse suggestions by ensuring variety
+  const suggestions: { top: Garment; bottom: Garment; outerwear: Garment | null; shoe: Garment }[] = [];
+  const usedTops = new Set<string>();
+  const usedBottoms = new Set<string>();
+  const usedShoes = new Set<string>();
+  const usedOuters = new Set<string>();
+
+  // Helper to get unused items
+  const getUnused = (items: Garment[], used: Set<string>): Garment[] => 
+    items.filter(item => !used.has(item.id));
+
+  // Generate candidates with scoring
+  for (let i = 0; i < maxResults; i++) {
+    const availTops = getUnused(tops, usedTops);
+    const availBottoms = getUnused(bottoms, usedBottoms);
+    const availShoes = getUnused(shoes, usedShoes);
+    const availOuters = outers[0] === null ? [null] : getUnused(outers as Garment[], usedOuters);
+
+    if (!availTops.length || !availBottoms.length || !availShoes.length) {
+      // Fall back to reusing items if we run out
+      break;
+    }
+
+    // Generate combinations for this suggestion
+    const candidates: (Garment|null)[][] = [];
+    for (const top of availTops.slice(0, 5)) // Limit to top 5 of each to avoid explosion
+      for (const bottom of availBottoms.slice(0, 5))
+        for (const shoe of availShoes.slice(0, 5)) {
+          if (availOuters[0] === null) {
+            candidates.push([top, bottom, null, shoe]);
+          } else {
+            for (const outer of availOuters.slice(0, 3)) {
+              candidates.push([top, bottom, outer, shoe]);
+            }
+          }
+        }
+
+    if (candidates.length === 0) break;
+
+    // Score and add randomness for variety
+    const scored = candidates.map(set => ({
+      set,
+      score: styleScore(set.filter(Boolean) as Garment[]) + rotationBonus(set) + Math.random() * 2
+    })).sort((a, b) => b.score - a.score);
+
+    // Pick the best one and mark items as used
+    const best = scored[0];
+    const [top, bottom, outer, shoe] = best.set;
+    
+    suggestions.push({ 
+      top: top!, 
+      bottom: bottom!, 
+      outerwear: outer, 
+      shoe: shoe! 
+    });
+
+    usedTops.add(top!.id);
+    usedBottoms.add(bottom!.id);
+    usedShoes.add(shoe!.id);
+    if (outer) usedOuters.add(outer.id);
   }
 
-  const scored = candidates.map(set => ({
-    set,
-    score: styleScore(set.filter(Boolean) as Garment[]) + rotationBonus(set)
-  })).sort((a,b)=>b.score-a.score);
+  // If we couldn't generate enough unique suggestions, fall back to original method
+  if (suggestions.length < maxResults) {
+    const candidates: (Garment|null)[][] = [];
+    for (const top of tops) for (const bottom of bottoms) for (const shoe of shoes) {
+      if (outers[0] === null) candidates.push([top,bottom,null,shoe]);
+      else for (const outer of outers) candidates.push([top,bottom,outer!,shoe]);
+    }
 
-  return scored.slice(0, maxResults).map(({ set }) => {
-    const [top,bottom,outer,shoe] = set;
-    return { top: top!, bottom: bottom!, outerwear: outer, shoe: shoe! };
-  });
+    const scored = candidates.map(set => ({
+      set,
+      score: styleScore(set.filter(Boolean) as Garment[]) + rotationBonus(set) + Math.random() * 2
+    })).sort((a,b)=>b.score-a.score);
+
+    // Add remaining suggestions avoiding duplicates
+    for (const { set } of scored) {
+      if (suggestions.length >= maxResults) break;
+      const [top, bottom, outer, shoe] = set;
+      
+      // Check if this combination is already suggested
+      const isDuplicate = suggestions.some(s => 
+        s.top.id === top!.id && 
+        s.bottom.id === bottom!.id && 
+        s.shoe.id === shoe!.id
+      );
+      
+      if (!isDuplicate) {
+        suggestions.push({ 
+          top: top!, 
+          bottom: bottom!, 
+          outerwear: outer, 
+          shoe: shoe! 
+        });
+      }
+    }
+  }
+
+  return suggestions.slice(0, maxResults);
 }
 
 function deriveTarget(w: Weather) {

@@ -1,6 +1,7 @@
 import React from "react";
-import { View, Text, ScrollView, Image, Button, StyleSheet, Alert, Dimensions } from "react-native";
+import { View, Text, ScrollView, Button, StyleSheet, Alert, Dimensions } from "react-native";
 import { useLocalSearchParams, router } from "expo-router";
+import { Image } from "expo-image";
 import { updateWear } from "~/lib/db";
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -51,7 +52,7 @@ export default function OutfitDetailScreen() {
       {/* Full-size garment images */}
       <View style={styles.itemSection}>
         <Text style={styles.itemLabel}>Top</Text>
-        <Image source={{ uri: outfit.top.imageUri }} style={styles.fullImage} />
+        <Image source={{ uri: outfit.top.imageUri }} style={styles.fullImage} contentFit="cover" transition={200} />
         <View style={styles.itemDetails}>
           <Text style={styles.detailText}>Type: {outfit.top.type}</Text>
           <Text style={styles.detailText}>Colors: {outfit.top.colors.join(", ")}</Text>
@@ -61,7 +62,7 @@ export default function OutfitDetailScreen() {
 
       <View style={styles.itemSection}>
         <Text style={styles.itemLabel}>Bottom</Text>
-        <Image source={{ uri: outfit.bottom.imageUri }} style={styles.fullImage} />
+        <Image source={{ uri: outfit.bottom.imageUri }} style={styles.fullImage} contentFit="cover" transition={200} />
         <View style={styles.itemDetails}>
           <Text style={styles.detailText}>Type: {outfit.bottom.type}</Text>
           <Text style={styles.detailText}>Colors: {outfit.bottom.colors.join(", ")}</Text>
@@ -72,7 +73,7 @@ export default function OutfitDetailScreen() {
       {outfit.outerwear && (
         <View style={styles.itemSection}>
           <Text style={styles.itemLabel}>Outerwear</Text>
-          <Image source={{ uri: outfit.outerwear.imageUri }} style={styles.fullImage} />
+          <Image source={{ uri: outfit.outerwear.imageUri }} style={styles.fullImage} contentFit="cover" transition={200} />
           <View style={styles.itemDetails}>
             <Text style={styles.detailText}>Type: {outfit.outerwear.type}</Text>
             <Text style={styles.detailText}>Colors: {outfit.outerwear.colors.join(", ")}</Text>
@@ -83,7 +84,7 @@ export default function OutfitDetailScreen() {
 
       <View style={styles.itemSection}>
         <Text style={styles.itemLabel}>Shoes</Text>
-        <Image source={{ uri: outfit.shoe.imageUri }} style={styles.fullImage} />
+        <Image source={{ uri: outfit.shoe.imageUri }} style={styles.fullImage} contentFit="cover" transition={200} />
         <View style={styles.itemDetails}>
           <Text style={styles.detailText}>Type: {outfit.shoe.type}</Text>
           <Text style={styles.detailText}>Colors: {outfit.shoe.colors.join(", ")}</Text>

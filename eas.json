@@ -17,6 +17,7 @@
         "simulator": false,
         "buildConfiguration": "Release"
       },
+      "channel": "preview",
       "env": {
         "EXPO_PUBLIC_ENV": "preview"
       }
@@ -25,6 +26,7 @@
       "ios": {
         "buildConfiguration": "Release"
       },
+      "channel": "production",
       "env": {
         "EXPO_PUBLIC_ENV": "production"
       },
@@ -34,9 +36,9 @@
   "submit": {
     "production": {
       "ios": {
-        "appleId": "your-apple-id@example.com",
-        "ascAppId": "YOUR_APP_STORE_CONNECT_APP_ID",
-        "appleTeamId": "YOUR_APPLE_TEAM_ID"
+        "appleId": "bisrat09@gmail.com",
+        "ascAppId": "6752586260",
+        "appleTeamId": "ZU5M6MDDB7"
       }
     }
   }
