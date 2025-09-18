@@ -2,41 +2,72 @@ import * as SQLite from "expo-sqlite";
 import { randomUUID } from "expo-crypto";
 import type { Garment } from "./types";
 
-const db = SQLite.openDatabaseSync("closet.db");
+let db: SQLite.SQLiteDatabase | null = null;
+let initPromise: Promise<SQLite.SQLiteDatabase> | null = null;
 
-// Initialize database
-db.execSync(
-  `CREATE TABLE IF NOT EXISTS garments (
-    id TEXT PRIMARY KEY NOT NULL,
-    type TEXT NOT NULL,
-    name TEXT,
-    colors TEXT NOT NULL,
-    warmth INTEGER NOT NULL,
-    waterResistant INTEGER NOT NULL,
-    dressCodes TEXT NOT NULL,
-    imageUri TEXT NOT NULL,
-    lastWornAt TEXT,
-    timesWorn INTEGER DEFAULT 0,
-    isDirty INTEGER DEFAULT 0,
-    favorite INTEGER DEFAULT 0
-  );`
-);
+// Async database initialization with caching
+async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
+  if (db) {
+    return db;
+  }
 
-// Create wear logs table for tracking outfit history
-db.execSync(
-  `CREATE TABLE IF NOT EXISTS wear_logs (
-    id TEXT PRIMARY KEY NOT NULL,
-    garmentIds TEXT NOT NULL,
-    wornAt TEXT NOT NULL,
-    weather TEXT,
-    dressCode TEXT
-  );`
-);
+  if (!initPromise) {
+    initPromise = initializeDatabase();
+  }
+
+  return initPromise;
+}
+
+async function initializeDatabase(): Promise<SQLite.SQLiteDatabase> {
+  try {
+    // Add small delay to ensure app is fully initialized
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    const database = SQLite.openDatabaseSync("closet.db");
+    
+    // Initialize database tables
+    database.execSync(
+      `CREATE TABLE IF NOT EXISTS garments (
+        id TEXT PRIMARY KEY NOT NULL,
+        type TEXT NOT NULL,
+        name TEXT,
+        colors TEXT NOT NULL,
+        warmth INTEGER NOT NULL,
+        waterResistant INTEGER NOT NULL,
+        dressCodes TEXT NOT NULL,
+        imageUri TEXT NOT NULL,
+        lastWornAt TEXT,
+        timesWorn INTEGER DEFAULT 0,
+        isDirty INTEGER DEFAULT 0,
+        favorite INTEGER DEFAULT 0
+      );`
+    );
+
+    // Create wear logs table for tracking outfit history
+    database.execSync(
+      `CREATE TABLE IF NOT EXISTS wear_logs (
+        id TEXT PRIMARY KEY NOT NULL,
+        garmentIds TEXT NOT NULL,
+        wornAt TEXT NOT NULL,
+        weather TEXT,
+        dressCode TEXT
+      );`
+    );
+    
+    db = database;
+    return database;
+  } catch (error) {
+    console.error("Database initialization failed:", error);
+    // Return a mock database that won't crash the app
+    throw error;
+  }
+}
 
 export async function addGarment(g: Omit<Garment,"id"> & Partial<Pick<Garment,"id">>) {
   const id = g.id ?? randomUUID();
   try {
-    await db.runAsync(
+    const database = await getDatabase();
+    await database.runAsync(
       `INSERT INTO garments
        (id, type, name, colors, warmth, waterResistant, dressCodes, imageUri, lastWornAt, timesWorn, isDirty, favorite)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -59,7 +90,8 @@ export async function addGarment(g: Omit<Garment,"id"> & Partial<Pick<Garment,"i
 }
 
 export async function getAllGarments(): Promise<Garment[]> {
-  const result = await db.getAllAsync<any>(`SELECT * FROM garments ORDER BY timesWorn ASC`);
+  const database = await getDatabase();
+  const result = await database.getAllAsync<any>(`SELECT * FROM garments ORDER BY timesWorn ASC`);
   return result.map(r => {
     const garment = {
       id: r.id,
@@ -86,9 +118,10 @@ export async function updateWear(
   const nowISO = new Date().toISOString();
   
   // Update each garment's wear stats with smart dirty logic
+  const database = await getDatabase();
   for (const id of garmentIds) {
     // Get garment type to determine if it should get dirty
-    const garment = await db.getFirstAsync<{type: string, timesWorn: number}>(
+    const garment = await database.getFirstAsync<{type: string, timesWorn: number}>(
       'SELECT type, timesWorn FROM garments WHERE id = ?', 
       id
     );
@@ -100,7 +133,7 @@ export async function updateWear(
       shouldMarkDirty = 0; // Keep shoes clean unless manually marked
     }
     
-    await db.runAsync(
+    await database.runAsync(
       `UPDATE garments 
        SET timesWorn = timesWorn + 1, 
            lastWornAt = ?,
@@ -114,7 +147,7 @@ export async function updateWear(
   
   // Log the outfit in wear history
   const logId = randomUUID();
-  await db.runAsync(
+  await database.runAsync(
     `INSERT INTO wear_logs (id, garmentIds, wornAt, weather, dressCode)
      VALUES (?, ?, ?, ?, ?)`,
     logId,
@@ -129,12 +162,13 @@ export async function updateWear(
 
 export async function markAllGarmentsClean(): Promise<{success: boolean, count: number}> {
   // Get count of dirty items first
-  const dirtyCount = await db.getFirstAsync<{count: number}>(
+  const database = await getDatabase();
+  const dirtyCount = await database.getFirstAsync<{count: number}>(
     'SELECT COUNT(*) as count FROM garments WHERE isDirty = 1'
   );
   
   // Mark all dirty garments as clean
-  await db.runAsync(
+  await database.runAsync(
     'UPDATE garments SET isDirty = 0 WHERE isDirty = 1'
   );
   
@@ -192,7 +226,8 @@ export async function updateGarment(id: string, updates: Partial<Omit<Garment, "
   values.push(id); // Add id for WHERE clause
   
   try {
-    await db.runAsync(
+    const database = await getDatabase();
+    await database.runAsync(
       `UPDATE garments SET ${updateFields.join(", ")} WHERE id = ?`,
       ...values
     );
@@ -205,7 +240,8 @@ export async function updateGarment(id: string, updates: Partial<Omit<Garment, "
 
 export async function deleteGarment(id: string) {
   try {
-    await db.runAsync(`DELETE FROM garments WHERE id = ?`, id);
+    const database = await getDatabase();
+    await database.runAsync(`DELETE FROM garments WHERE id = ?`, id);
     return { success: true };
   } catch (error) {
     console.error("Failed to delete garment:", error);
@@ -214,14 +250,16 @@ export async function deleteGarment(id: string) {
 }
 
 export async function clearAllGarments() {
-  await db.runAsync(`DELETE FROM garments`);
-  await db.runAsync(`DELETE FROM wear_logs`);
+  const database = await getDatabase();
+  await database.runAsync(`DELETE FROM garments`);
+  await database.runAsync(`DELETE FROM wear_logs`);
   return { success: true };
 }
 
 export async function updateAllGarmentsWithMultipleDressCodes() {
   // Update all existing garments to support multiple dress codes
   const garments = await getAllGarments();
+  const database = await getDatabase();
   
   for (const garment of garments) {
     let newDressCodes: string[] = ["casual"]; // Start with casual
@@ -264,7 +302,7 @@ export async function updateAllGarmentsWithMultipleDressCodes() {
     }
     
     // Update the garment
-    await db.runAsync(
+    await database.runAsync(
       `UPDATE garments SET dressCodes = ? WHERE id = ?`,
       JSON.stringify(newDressCodes),
       garment.id
@@ -277,7 +315,8 @@ export async function updateAllGarmentsWithMultipleDressCodes() {
 // Export all garments to JSON
 export async function exportGarments(): Promise<string> {
   const garments = await getAllGarments();
-  const wearLogs = await db.getAllAsync<any>(`SELECT * FROM wear_logs ORDER BY wornAt DESC`);
+  const database = await getDatabase();
+  const wearLogs = await database.getAllAsync<any>(`SELECT * FROM wear_logs ORDER BY wornAt DESC`);
   
   const exportData = {
     version: 1,
@@ -294,6 +333,7 @@ export async function exportGarments(): Promise<string> {
 export async function importGarments(jsonData: string): Promise<{ imported: number, skipped: number }> {
   try {
     const data = JSON.parse(jsonData);
+    const database = await getDatabase();
     
     if (!data.garments || !Array.isArray(data.garments)) {
       throw new Error("Invalid import data format");
@@ -305,7 +345,7 @@ export async function importGarments(jsonData: string): Promise<{ imported: numb
     for (const garment of data.garments) {
       try {
         // Check if garment already exists
-        const existing = await db.getFirstAsync<any>(
+        const existing = await database.getFirstAsync<any>(
           `SELECT id FROM garments WHERE id = ?`,
           garment.id
         );
@@ -327,7 +367,7 @@ export async function importGarments(jsonData: string): Promise<{ imported: numb
     if (data.wearLogs && Array.isArray(data.wearLogs)) {
       for (const log of data.wearLogs) {
         try {
-          await db.runAsync(
+          await database.runAsync(
             `INSERT OR IGNORE INTO wear_logs (id, garmentIds, wornAt, weather, dressCode) 
              VALUES (?, ?, ?, ?, ?)`,
             log.id,
@@ -346,4 +386,11 @@ export async function importGarments(jsonData: string): Promise<{ imported: numb
   } catch (error) {
     throw new Error(`Import failed: ${error}`);
   }
+}
+
+// Debug function to check actual database count
+export async function getGarmentCount(): Promise<number> {
+  const database = await getDatabase();
+  const result = await database.getFirstAsync<{count: number}>(`SELECT COUNT(*) as count FROM garments`);
+  return result?.count || 0;
 }

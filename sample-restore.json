@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "exportDate": "2025-09-16T00:00:00.000Z",
+  "garmentCount": 5,
+  "garments": [
+    {
+      "id": "sample-1",
+      "type": "top",
+      "name": "Sample Shirt",
+      "colors": ["blue", "white"],
+      "warmth": 2,
+      "waterResistant": 0,
+      "dressCodes": ["casual", "smart_casual"],
+      "imageUri": "",
+      "lastWornAt": null,
+      "timesWorn": 0,
+      "isDirty": false,
+      "favorite": false
+    },
+    {
+      "id": "sample-2", 
+      "type": "bottom",
+      "name": "Sample Jeans",
+      "colors": ["navy", "black"],
+      "warmth": 3,
+      "waterResistant": 0,
+      "dressCodes": ["casual"],
+      "imageUri": "",
+      "lastWornAt": null,
+      "timesWorn": 0,
+      "isDirty": false,
+      "favorite": false
+    },
+    {
+      "id": "sample-3",
+      "type": "shoe", 
+      "name": "Sample Sneakers",
+      "colors": ["white"],
+      "warmth": 2,
+      "waterResistant": 0,
+      "dressCodes": ["casual", "sport"],
+      "imageUri": "",
+      "lastWornAt": null,
+      "timesWorn": 0,
+      "isDirty": false,
+      "favorite": false
+    },
+    {
+      "id": "sample-4",
+      "type": "outerwear",
+      "name": "Sample Jacket", 
+      "colors": ["black"],
+      "warmth": 4,
+      "waterResistant": 1,
+      "dressCodes": ["casual", "smart_casual"],
+      "imageUri": "",
+      "lastWornAt": null,
+      "timesWorn": 0,
+      "isDirty": false,
+      "favorite": false
+    },
+    {
+      "id": "sample-5",
+      "type": "accessory",
+      "name": "Sample Hat",
+      "colors": ["gray"],
+      "warmth": 1,
+      "waterResistant": 0, 
+      "dressCodes": ["casual", "sport"],
+      "imageUri": "",
+      "lastWornAt": null,
+      "timesWorn": 0,
+      "isDirty": false,
+      "favorite": false
+    }
+  ],
+  "wearLogs": []
+}

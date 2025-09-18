@@ -2,11 +2,12 @@
   "expo": {
     "name": "Closy",
     "slug": "match-wardrobe",
+    "scheme": "closy",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -15,7 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.bisratbelayneh.closy",
-      "buildNumber": "2",
+      "buildNumber": "13",
       "config": {
         "usesNonExemptEncryption": false
       },

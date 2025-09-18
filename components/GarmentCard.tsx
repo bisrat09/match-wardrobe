@@ -76,5 +76,5 @@ const styles = StyleSheet.create({
   dirtyText: { fontSize: 12 },
   name: { marginTop: 6, fontWeight:"600" },
   meta: { marginTop: 2, fontSize:12, color:"#666" },
-  hint: { marginTop: 4, fontSize: 10, color: "#007AFF", fontStyle: "italic", textAlign: "center" }
+  hint: { marginTop: 4, fontSize: 10, color: "#999", fontStyle: "normal", textAlign: "center" }
 });

@@ -4,7 +4,6 @@ import {
   Text, 
   TextInput, 
   TouchableOpacity, 
-  FlatList, 
   Dimensions, 
   StyleSheet, 
   Alert, 
@@ -15,9 +14,9 @@ import {
   ActivityIndicator 
 } from "react-native";
 import { Image } from "expo-image";
-import { router } from "expo-router";
+import { router, Stack } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
-import { addGarment, getAllGarments, updateGarment, deleteGarment, markAllGarmentsClean } from "~/lib/db";
+import { addGarment, getAllGarments, updateGarment, deleteGarment, markAllGarmentsClean, getGarmentCount } from "~/lib/db";
 import type { Garment, ClothingType, DressCode, Warmth } from "~/lib/types";
 import GarmentCard from "~/components/GarmentCard";
 import { saveImagePersistently, deletePersistedImage } from "~/lib/imageStorage";
@@ -72,6 +71,7 @@ const getColorValue = (color: string) => {
 
 export default function ClosetScreen() {
   const [items, setItems] = useState<Garment[]>([]);
+  const [dbCount, setDbCount] = useState<number>(0);
   const [busy, setBusy] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string>("");
@@ -110,25 +110,61 @@ export default function ClosetScreen() {
         // 1. Create automatic backup
         await checkAndCreateBackup();
         
-        // 2. Run image health check
-        const healthCheck = await performImageHealthCheck(true); // Silent mode
-        if (healthCheck.missingImages > 0 || healthCheck.repairedImages > 0) {
-          console.log(`Health check: ${healthCheck.repairedImages} repaired, ${healthCheck.missingImages} missing`);
-        }
+        // 2. DISABLED - Image health check causing crashes with deprecated API
+        // const healthCheck = await performImageHealthCheck(true); // Silent mode
+        // if (healthCheck.missingImages > 0 || healthCheck.repairedImages > 0) {
+        //   console.log(`Health check: ${healthCheck.repairedImages} repaired, ${healthCheck.missingImages} missing`);
+        // }
         
-        // 3. Run migration if needed
-        const migrationResult = await migrateAllImages();
-        if (migrationResult.failedCount > 0) {
-          Alert.alert(
-            "Image Recovery",
-            migrationResult.message,
-            [{ text: "OK" }]
-          );
-        }
+        // 3. DISABLED - Migration also uses deprecated API
+        // const migrationResult = await migrateAllImages();
+        // if (migrationResult.failedCount > 0) {
+        //   Alert.alert(
+        //     "Image Recovery",
+        //     migrationResult.message,
+        //     [{ text: "OK" }]
+        //   );
+        // }
       }
       
       const garments = await getAllGarments();
+      const actualDbCount = await getGarmentCount();
+      
+      setDbCount(actualDbCount);
+      console.log(`🔍 Database query: ${garments.length} items returned, ${actualDbCount} total in DB`);
+      
+      // DISABLED - Check for orphaned images uses deprecated API
+      // if (garments.length === 0 && !isRefreshing) {
+      //   try {
+      //     console.log("🔍 No garments found, checking for orphaned images...");
+      //     const { checkOrphanedImages, recoverFromOrphanedImages } = await import("~/lib/imageRecovery");
+      //     const orphanCheck = await checkOrphanedImages();
+      //     
+      //     if (orphanCheck.imageCount > 0) {
+      //       console.log(`Found ${orphanCheck.imageCount} orphaned images, attempting recovery...`);
+      //       const recoveryResult = await recoverFromOrphanedImages();
+      //       
+      //       if (recoveryResult.recovered > 0) {
+      //         console.log(`✅ Auto-recovered ${recoveryResult.recovered} garments!`);
+      //         Alert.alert(
+      //           "🎉 Data Recovered!",
+      //           `Automatically recovered ${recoveryResult.recovered} garments from orphaned images!\n\nYour wardrobe is back!`,
+      //           [{ text: "Amazing!", style: "default" }]
+      //         );
+      //         
+      //         // Reload the garments after recovery
+      //         const recoveredGarments = await getAllGarments();
+      //         setItems(recoveredGarments);
+      //         return; // Exit early, we've got our data
+      //       }
+      //     }
+      //   } catch (error) {
+      //     console.error("Auto-recovery failed:", error);
+      //   }
+      // }
+      
       setItems(garments);
+      console.log(`📊 Loaded ${garments.length} garments from database`);
     } catch (error: any) {
       console.error("Load garments error:", error);
       Alert.alert(
@@ -146,7 +182,7 @@ export default function ClosetScreen() {
   };
   
   const filteredItems = useMemo(() => {
-    return items.filter(item => {
+    const filtered = items.filter(item => {
       if (filterType !== "all" && item.type !== filterType) return false;
       if (filterDressCode !== "all" && !item.dressCodes.includes(filterDressCode)) return false;
       if (showDirtyOnly && !item.isDirty) return false;
@@ -157,19 +193,81 @@ export default function ClosetScreen() {
       const colorMatch = item.colors.some(c => c.toLowerCase().includes(searchLower));
       return nameMatch || colorMatch;
     });
+    console.log(`🔍 Filtered: ${filtered.length} of ${items.length} items shown`);
+    return filtered;
   }, [items, searchQuery, filterType, filterDressCode, showDirtyOnly]);
 
   useEffect(() => { load(); }, []);
 
   const openImagePicker = async () => {
-    const img = await ImagePicker.launchImageLibraryAsync({ 
-      mediaTypes: ['images'], 
-      quality: 0.8 
-    });
-    if (!img.canceled) {
-      setSelectedImage(img.assets[0].uri);
-      setShowModal(true);
-    }
+    // DISABLED - Check for orphaned images uses deprecated API
+    /*
+    try {
+      const { checkOrphanedImages, recoverFromOrphanedImages } = await import("~/lib/imageRecovery");
+      const orphanCheck = await checkOrphanedImages();
+      
+      if (orphanCheck.imageCount > items.length && orphanCheck.imageCount > 1) {
+        // We have orphaned images - offer recovery
+        Alert.alert(
+          "🔍 Found Lost Data!",
+          `Found ${orphanCheck.imageCount - items.length} orphaned images from your previous wardrobe!\n\nRecover all your garments now?`,
+          [
+            { 
+              text: "Add New Item", 
+              style: "cancel",
+              onPress: async () => {
+                // Normal add flow
+                const img = await ImagePicker.launchImageLibraryAsync({ 
+                  mediaTypes: ['images'], 
+                  quality: 0.8 
+                });
+                if (!img.canceled) {
+                  setSelectedImage(img.assets[0].uri);
+                  setShowModal(true);
+                }
+              }
+            },
+            { 
+              text: "🚀 Recover All", 
+              onPress: async () => {
+                try {
+                  const result = await recoverFromOrphanedImages();
+                  Alert.alert(
+                    "🎉 Recovery Complete!",
+                    `Recovered ${result.recovered} garments!\n\nYour wardrobe is back!`,
+                    [{ text: "Amazing!", onPress: () => load() }]
+                  );
+                } catch (error: any) {
+                  Alert.alert("❌ Recovery Failed", error?.message || "Recovery process failed");
+                }
+              }
+            }
+          ]
+        );
+      } else {
+        // Normal add flow - no orphaned images
+        const img = await ImagePicker.launchImageLibraryAsync({ 
+          mediaTypes: ['images'], 
+          quality: 0.8 
+        });
+        if (!img.canceled) {
+          setSelectedImage(img.assets[0].uri);
+          setShowModal(true);
+        }
+      }
+    } catch (error) {
+      console.error("Recovery check failed:", error);
+      */
+      // Fallback to normal add - always use this now
+      const img = await ImagePicker.launchImageLibraryAsync({ 
+        mediaTypes: ['images'], 
+        quality: 0.8 
+      });
+      if (!img.canceled) {
+        setSelectedImage(img.assets[0].uri);
+        setShowModal(true);
+      }
+    // End of function - removed extra brace
   };
 
   const handleSaveGarment = async () => {
@@ -415,8 +513,10 @@ export default function ClosetScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <View style={styles.container}>
+    <>
+      <Stack.Screen options={{ headerShown: false }} />
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerLeft}>
@@ -425,7 +525,13 @@ export default function ClosetScreen() {
             </TouchableOpacity>
           </View>
           <View style={styles.headerCenter}>
-            <Text style={styles.title}>Closet</Text>
+            <View>
+              <Text style={styles.title}>Closet</Text>
+              <Text style={{ fontSize: 12, color: colors.lightText, textAlign: 'center' }}>
+                {filteredItems.length} {filteredItems.length !== items.length ? `of ${items.length} ` : ''}items
+                {dbCount !== items.length && ` (DB: ${dbCount})`}
+              </Text>
+            </View>
           </View>
           <View style={styles.headerActions}>
             <TouchableOpacity 
@@ -439,7 +545,7 @@ export default function ClosetScreen() {
             </TouchableOpacity>
             {!isMultiSelectMode && (
               <TouchableOpacity onPress={openImagePicker}>
-                <Text style={styles.navLink}>＋ Add</Text>
+                <Text style={styles.navLink}>Add</Text>
               </TouchableOpacity>
             )}
           </View>
@@ -527,13 +633,9 @@ export default function ClosetScreen() {
           )}
         </View>
 
-        {/* Grid */}
-        <FlatList
-          data={filteredItems}
-          keyExtractor={(item) => item.id}
-          numColumns={2}
-          columnWrapperStyle={{ gap: GUTTER }}
-          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, gap: GUTTER }}
+        {/* Grid - using ScrollView to bypass FlatList rendering issues */}
+        <ScrollView
+          contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -542,57 +644,58 @@ export default function ClosetScreen() {
               tintColor={colors.primary}
             />
           }
-          // Performance optimizations
-          removeClippedSubviews={true}
-          maxToRenderPerBatch={10}
-          initialNumToRender={20}
-          windowSize={10}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              onPress={() => {
-                if (isMultiSelectMode) {
-                  toggleItemSelection(item.id);
-                } else {
-                  handleEdit(item);
-                }
-              }}
-              onLongPress={() => {
-                if (!isMultiSelectMode) {
-                  handleEdit(item);
-                }
-              }}
-              style={[
-                styles.garmentWrapper,
-                isMultiSelectMode && selectedItems.has(item.id) && styles.selectedGarment
-              ]}
-            >
-              <GarmentCard 
-                garment={item} 
-                onLongPress={() => !isMultiSelectMode && handleEdit(item)}
-              />
-              {isMultiSelectMode && (
-                <View style={styles.selectionOverlay}>
-                  <View style={[
-                    styles.selectionCheckbox,
-                    selectedItems.has(item.id) && styles.selectedCheckbox
-                  ]}>
-                    {selectedItems.has(item.id) && (
-                      <Text style={styles.selectionCheckmark}>✓</Text>
-                    )}
-                  </View>
-                </View>
-              )}
-            </TouchableOpacity>
-          )}
-          ListEmptyComponent={
+        >
+          {filteredItems.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyText}>No items match your filters</Text>
               <TouchableOpacity style={styles.addButton} onPress={openImagePicker}>
                 <Text style={styles.addButtonText}>Add your first item</Text>
               </TouchableOpacity>
             </View>
-          }
-        />
+          ) : (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: GUTTER }}>
+              {filteredItems.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  onPress={() => {
+                    if (isMultiSelectMode) {
+                      toggleItemSelection(item.id);
+                    } else {
+                      handleEdit(item);
+                    }
+                  }}
+                  onLongPress={() => {
+                    if (!isMultiSelectMode) {
+                      handleEdit(item);
+                    }
+                  }}
+                  style={[
+                    styles.garmentWrapper,
+                    { width: (SCREEN.width - 32 - GUTTER) / 2 },
+                    isMultiSelectMode && selectedItems.has(item.id) && styles.selectedGarment
+                  ]}
+                >
+                  <GarmentCard 
+                    garment={item} 
+                    onLongPress={() => !isMultiSelectMode && handleEdit(item)}
+                  />
+                  {isMultiSelectMode && (
+                    <View style={styles.selectionOverlay}>
+                      <View style={[
+                        styles.selectionCheckbox,
+                        selectedItems.has(item.id) && styles.selectedCheckbox
+                      ]}>
+                        {selectedItems.has(item.id) && (
+                          <Text style={styles.selectionCheckmark}>✓</Text>
+                        )}
+                      </View>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+        </ScrollView>
 
         {/* Add/Edit Modal */}
         <Modal visible={showModal} animationType="slide">
@@ -768,6 +871,7 @@ export default function ClosetScreen() {
         </Modal>
       </View>
     </SafeAreaView>
+    </>
   );
 }
 
@@ -824,9 +928,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
+    minHeight: 50,
   },
   title: {
     fontSize: 24,
@@ -855,7 +959,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   selectButton: {
-    marginRight: 12,
+    marginRight: 20,
   },
   
   // Search

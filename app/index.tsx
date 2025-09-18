@@ -35,33 +35,35 @@ export default function TodayScreen() {
     }
     
     try {
-      const data = await getAllGarments();
-      setGarments(data);
-      
+      // Load garments first (safer, local operation)
       try {
-        const loc = await getLocationOrAsk();
-        const w = await fetchWeather(loc.latitude, loc.longitude);
-        setWeather(w);
-      } catch (e: any) {
-        if (!isRefreshing) {
-          Alert.alert(
-            "Weather Update", 
-            "We're using default weather for now. You can still get great outfit suggestions!",
-            [{ text: "Got it!" }]
-          );
-        }
-        setWeather({ tempC: 20, chanceOfRain: 0.1, windKph: 8, isSnow: false });
+        const data = await getAllGarments();
+        setGarments(data);
+      } catch (dbError: any) {
+        console.error("Database error:", dbError);
+        setGarments([]); // Fallback to empty array
       }
+      
+      // Set default weather immediately to prevent crashes
+      setWeather({ tempC: 20, chanceOfRain: 0.1, windKph: 8, isSnow: false });
+      
+      // Try to get real weather in background (don't block UI)
+      setTimeout(async () => {
+        try {
+          const loc = await getLocationOrAsk();
+          const w = await fetchWeather(loc.latitude, loc.longitude);
+          setWeather(w);
+        } catch (e: any) {
+          console.log("Weather fetch failed, using defaults:", e.message);
+          // Keep default weather, no alert on startup
+        }
+      }, 1000);
+      
     } catch (error: any) {
       console.error("Load data error:", error);
-      Alert.alert(
-        "Connection Issue", 
-        "Having trouble loading your wardrobe. Please check your internet connection and try again.",
-        [
-          { text: "Retry", onPress: () => load(isRefreshing) },
-          { text: "Cancel", style: "cancel" }
-        ]
-      );
+      // Set safe defaults
+      setGarments([]);
+      setWeather({ tempC: 20, chanceOfRain: 0.1, windKph: 8, isSnow: false });
     } finally {
       setLoading(false);
       setRefreshing(false);
