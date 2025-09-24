@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Expo Dev",
+      "type": "shell",
+      "command": "npx expo start",
+      "problemMatcher": [],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "iOS Simulator",
+      "type": "shell",
+      "command": "npx expo start --ios",
+      "problemMatcher": []
+    },
+    {
+      "label": "Android Emulator",
+      "type": "shell",
+      "command": "npx expo start --android",
+      "problemMatcher": []
+    },
+    {
+      "label": "TypeScript Check",
+      "type": "shell",
+      "command": "npx tsc --noEmit",
+      "problemMatcher": []
+    }
+  ]
+}

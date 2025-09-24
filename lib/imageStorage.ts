@@ -2,7 +2,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { randomUUID } from 'expo-crypto';
 
 // Directory for persistent image storage - this won't be cleared on app updates
-const IMAGES_DIR = `${FileSystem.documentDirectory}garment_images/`;
+const IMAGES_DIR = `${FileSystem.documentDirectory}closy/images/`;
+const OLD_IMAGES_DIR = `${FileSystem.documentDirectory}garment_images/`;
 
 /**
  * Ensures the images directory exists
@@ -78,12 +79,18 @@ export function isTemporaryUri(uri: string): boolean {
  */
 export async function migrateImageIfNeeded(uri: string): Promise<string> {
   if (!uri) return uri;
-  
-  // Check if it's already in persistent storage
+
+  // Check if it's already in new persistent storage
   if (uri.startsWith(IMAGES_DIR)) {
     return uri;
   }
-  
+
+  // Check if it's in old persistent storage - update path
+  if (uri.startsWith(OLD_IMAGES_DIR)) {
+    const fileName = uri.replace(OLD_IMAGES_DIR, '');
+    return `${IMAGES_DIR}${fileName}`;
+  }
+
   // Check if it's a temporary URI that needs migration
   if (isTemporaryUri(uri)) {
     try {
@@ -102,7 +109,7 @@ export async function migrateImageIfNeeded(uri: string): Promise<string> {
       return '';
     }
   }
-  
+
   // Return as-is for other URIs (like web URLs)
   return uri;
 }
@@ -113,18 +120,18 @@ export async function migrateImageIfNeeded(uri: string): Promise<string> {
 export async function getImagesDirectoryInfo() {
   await ensureImagesDirectory();
   const dirInfo = await FileSystem.getInfoAsync(IMAGES_DIR);
-  
+
   if (dirInfo.exists && dirInfo.isDirectory) {
     const files = await FileSystem.readDirectoryAsync(IMAGES_DIR);
     let totalSize = 0;
-    
+
     for (const file of files) {
       const fileInfo = await FileSystem.getInfoAsync(`${IMAGES_DIR}${file}`);
       if (fileInfo.exists && 'size' in fileInfo) {
         totalSize += fileInfo.size;
       }
     }
-    
+
     return {
       path: IMAGES_DIR,
       fileCount: files.length,
@@ -132,11 +139,66 @@ export async function getImagesDirectoryInfo() {
       totalSizeMB: (totalSize / 1024 / 1024).toFixed(2)
     };
   }
-  
+
   return {
     path: IMAGES_DIR,
     fileCount: 0,
     totalSizeBytes: 0,
     totalSizeMB: '0'
   };
+}
+
+/**
+ * Migrates images from old directory structure to new closy/ directory
+ * @returns Number of images migrated
+ */
+export async function migrateToClosyDirectory(): Promise<number> {
+  try {
+    await ensureImagesDirectory();
+
+    // Check if old directory exists
+    const oldDirInfo = await FileSystem.getInfoAsync(OLD_IMAGES_DIR);
+    if (!oldDirInfo.exists) {
+      return 0;
+    }
+
+    // Read all files from old directory
+    const files = await FileSystem.readDirectoryAsync(OLD_IMAGES_DIR);
+    let migratedCount = 0;
+
+    for (const file of files) {
+      const oldPath = `${OLD_IMAGES_DIR}${file}`;
+      const newPath = `${IMAGES_DIR}${file}`;
+
+      try {
+        // Check if file exists in old location
+        const fileInfo = await FileSystem.getInfoAsync(oldPath);
+        if (fileInfo.exists) {
+          // Move file to new location
+          await FileSystem.moveAsync({
+            from: oldPath,
+            to: newPath
+          });
+          migratedCount++;
+        }
+      } catch (error) {
+        console.error(`Error migrating file ${file}:`, error);
+      }
+    }
+
+    // Try to remove old directory if empty
+    try {
+      const remainingFiles = await FileSystem.readDirectoryAsync(OLD_IMAGES_DIR);
+      if (remainingFiles.length === 0) {
+        await FileSystem.deleteAsync(OLD_IMAGES_DIR);
+      }
+    } catch (error) {
+      // Ignore errors when deleting old directory
+    }
+
+    return migratedCount;
+  } catch (error) {
+    console.error('Error during migration to closy directory:', error);
+    return 0;
+  }
 }

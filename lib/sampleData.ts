@@ -1,5 +1,5 @@
 import { addGarment } from './db';
-import type { ClothingType, DressCode } from './types';
+import type { ClothingType, DressCode, Warmth } from './types';
 
 // Sample garment data for testing
 const sampleGarments = [
@@ -47,8 +47,8 @@ export async function addSampleData() {
         type: garment.type,
         name: garment.name,
         colors: garment.colors,
-        warmth: garment.warmth,
-        waterResistant: garment.waterResistant ? 1 : 0,
+        warmth: garment.warmth as Warmth,
+        waterResistant: (garment.waterResistant ? 1 : 0) as 0 | 1,
         dressCodes: garment.dressCodes,
         imageUri: placeholderImage,
         timesWorn: 0,

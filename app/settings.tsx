@@ -5,12 +5,13 @@ import * as FileSystem from "expo-file-system/legacy";
 import * as DocumentPicker from "expo-document-picker";
 import * as Sharing from "expo-sharing";
 import * as ImagePicker from "expo-image-picker";
-import { clearAllGarments, updateAllGarmentsWithMultipleDressCodes, exportGarments, importGarments, getAllGarments, updateGarment } from "~/lib/db";
-import { suggestOutfits } from "~/lib/rules";
+import { clearAllGarments, updateAllGarmentsWithMultipleDressCodes, exportGarments, importGarments, getAllGarments } from "~/lib/db";
 import { getImagesDirectoryInfo } from "~/lib/imageStorage";
-import { migrateAllImages } from "~/lib/imageMigration";
-import { getBackupStatus, createAutoBackup, restoreFromLatestBackup } from "~/lib/autoBackup";
-import { performImageHealthCheck } from "~/lib/imageHealthCheck";
+import { checkOrphanedImages, recoverFromOrphanedImages } from "~/lib/imageRecovery";
+import { generateStorageReport, formatStorageReport } from "~/lib/storageDebugger";
+import { copyProductionToDevSafely, checkDatabaseStatus } from "~/lib/copyProductionToDev";
+import { debugAllDatabases, debugCurrentDatabase } from "~/lib/debugDatabases";
+import { exportCurrentDatabase, importDatabaseFromFile } from "~/lib/exportImport";
 
 // Color palette - Burnt Orange Theme
 const colors = {
@@ -30,105 +31,224 @@ export default function SettingsScreen() {
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
   const [imageStorageInfo, setImageStorageInfo] = useState<any>(null);
-  const [migrating, setMigrating] = useState(false);
-  const [backupStatus, setBackupStatus] = useState<any>(null);
-  const [healthChecking, setHealthChecking] = useState(false);
-  
+  const [copying, setCopying] = useState(false);
+  const [dbStatus, setDbStatus] = useState<any>(null);
+  const [recovering, setRecovering] = useState(false);
+
   const loadImageStorageInfo = async () => {
     const info = await getImagesDirectoryInfo();
     setImageStorageInfo(info);
   };
-  
-  const loadBackupStatus = async () => {
-    const status = await getBackupStatus();
-    setBackupStatus(status);
+
+  const loadDatabaseStatus = async () => {
+    const status = await checkDatabaseStatus();
+    setDbStatus(status);
   };
-  
-  const handleCreateBackup = async () => {
-    setMigrating(true);
+
+  const handleCheckOrphanedImages = async () => {
+    setRecovering(true);
     try {
-      const result = await createAutoBackup();
-      if (result.success) {
-        Alert.alert("Backup Created", "Your wardrobe has been backed up successfully.");
-        await loadBackupStatus();
+      const orphanCheck = await checkOrphanedImages();
+      const currentGarments = await getAllGarments();
+      const orphanedCount = Math.max(0, orphanCheck.imageCount - currentGarments.length);
+
+      if (orphanedCount > 0) {
+        Alert.alert(
+          "🔍 Orphaned Images Found",
+          `Found ${orphanedCount} images without garment records.\n\nTotal images: ${orphanCheck.imageCount}\nCurrent garments: ${currentGarments.length}\n\nYou can recover these as new garments.`,
+          [{ text: "OK" }]
+        );
       } else {
-        Alert.alert("Backup Failed", result.error || "Unknown error");
+        Alert.alert(
+          "✅ No Orphaned Images",
+          `All images are properly linked to garments.\n\nImages: ${orphanCheck.imageCount}\nGarments: ${currentGarments.length}`,
+          [{ text: "OK" }]
+        );
       }
     } catch (error) {
-      Alert.alert("Error", "Failed to create backup");
+      Alert.alert("❌ Check Failed", String(error));
     } finally {
-      setMigrating(false);
+      setRecovering(false);
     }
   };
 
-  const handleRestoreBackup = async () => {
+  const handleRecoverImages = async () => {
+    setRecovering(true);
+    try {
+      const orphanCheck = await checkOrphanedImages();
+      const currentGarments = await getAllGarments();
+      const orphanedCount = Math.max(0, orphanCheck.imageCount - currentGarments.length);
+
+      if (orphanedCount === 0) {
+        Alert.alert(
+          "ℹ️ Nothing to Recover",
+          "No orphaned images found. All your images are already linked to garments.",
+          [{ text: "OK" }]
+        );
+        return;
+      }
+
+      Alert.alert(
+        "🚀 Recover Orphaned Images",
+        `Found ${orphanedCount} orphaned images.\n\nThis will create new garment records with default properties that you can edit later.\n\nContinue?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Recover All",
+            onPress: async () => {
+              try {
+                const result = await recoverFromOrphanedImages();
+                Alert.alert(
+                  "🎉 Recovery Complete!",
+                  `Successfully recovered ${result.recovered} garments!\n\n${result.failed > 0 ? `Failed: ${result.failed}` : 'All images recovered successfully.'}\n\nRefresh your closet to see the recovered items.`,
+                  [
+                    {
+                      text: "Go to Closet",
+                      onPress: () => router.push('/closet')
+                    },
+                    { text: "Stay Here" }
+                  ]
+                );
+
+                // Reload storage info
+                await loadImageStorageInfo();
+                await loadDatabaseStatus();
+              } catch (error) {
+                Alert.alert("❌ Recovery Failed", String(error));
+              }
+            }
+          }
+        ]
+      );
+    } catch (error) {
+      Alert.alert("❌ Error", String(error));
+    } finally {
+      setRecovering(false);
+    }
+  };
+
+  const handleStorageAnalysis = async () => {
+    setRecovering(true);
+    try {
+      const report = await generateStorageReport();
+      const formatted = formatStorageReport(report);
+
+      Alert.alert(
+        "📊 Storage Analysis Report",
+        formatted,
+        [
+          {
+            text: "Copy to Console",
+            onPress: () => {
+              console.log("=== STORAGE ANALYSIS REPORT ===");
+              console.log(formatted);
+              console.log("=== RAW DATA ===");
+              console.log(JSON.stringify(report, null, 2));
+            }
+          },
+          { text: "Close" }
+        ]
+      );
+    } catch (error) {
+      Alert.alert("❌ Analysis Failed", String(error));
+    } finally {
+      setRecovering(false);
+    }
+  };
+
+  const handleDebugDatabases = async () => {
+    setCopying(true);
+    try {
+      console.log("🔍 Starting comprehensive database debugging...");
+      const debugResults = await debugAllDatabases();
+      const currentDb = await debugCurrentDatabase();
+
+      let message = `🔍 DEBUGGING RESULTS:\n\n`;
+      message += `📱 Current App Database:\n`;
+      message += `- Using: ${currentDb.dbName} (Dev: ${currentDb.isDev})\n`;
+      message += `- Contains: ${currentDb.garmentCount} garments\n`;
+      message += `- Sample names: ${currentDb.sampleGarmentNames.slice(0, 2).join(', ')}\n\n`;
+
+      message += `🗃️ All Found Databases:\n`;
+      debugResults.databases.forEach(db => {
+        message += `- ${db.name}: ${db.garmentCount} garments\n`;
+        if (db.sampleData.length > 0) {
+          message += `  ⚠️ Contains sample data\n`;
+        }
+      });
+
+      message += `\n📁 Image Directories:\n`;
+      debugResults.directories.forEach(dir => {
+        const shortPath = dir.path.split('/').slice(-2).join('/');
+        message += `- ${shortPath}: ${dir.imageCount} images\n`;
+      });
+
+      Alert.alert(
+        "🔍 Database Debug Results",
+        message,
+        [
+          { text: "Copy Console Logs", onPress: () => {
+            console.log("=== FULL DEBUG RESULTS ===");
+            console.log("Current Database:", currentDb);
+            console.log("All Databases:", debugResults.databases);
+            console.log("All Directories:", debugResults.directories);
+          }},
+          { text: "OK" }
+        ]
+      );
+    } catch (error) {
+      Alert.alert("❌ Debug Failed", String(error));
+    } finally {
+      setCopying(false);
+    }
+  };
+
+  const handleCopyProductionToDev = async () => {
     Alert.alert(
-      "🔄 Restore Wardrobe",
-      "This will restore your garments from the latest backup. Any current items will be preserved.",
+      "🔄 Copy Production to Dev",
+      "This will safely copy all your TestFlight garments and images to the development environment. Your production data will not be modified.",
       [
         { text: "Cancel", style: "cancel" },
-        { 
-          text: "Restore", 
+        {
+          text: "Copy Safely",
           onPress: async () => {
-            setMigrating(true);
+            setCopying(true);
             try {
-              const result = await restoreFromLatestBackup();
-              Alert.alert(
-                result.success ? "✅ Restore Complete" : "❌ Restore Failed",
-                result.message
-              );
+              const result = await copyProductionToDevSafely();
+
+              const message = result.errors.length > 0
+                ? `✅ Copied ${result.copiedGarments} garments and ${result.copiedImages} images.\n\n⚠️ ${result.errors.length} errors:\n${result.errors.slice(0, 3).join('\n')}`
+                : `✅ Successfully copied ${result.copiedGarments} garments and ${result.copiedImages} images!`;
+
+              Alert.alert("Copy Complete", message);
+
+              // Reload data
+              await loadImageStorageInfo();
+              await loadDatabaseStatus();
             } catch (error) {
-              Alert.alert("❌ Error", String(error));
+              Alert.alert("❌ Copy Failed", String(error));
             } finally {
-              setMigrating(false);
+              setCopying(false);
             }
           }
         }
       ]
     );
   };
-  
-  const handleHealthCheck = async () => {
-    setHealthChecking(true);
-    try {
-      const result = await performImageHealthCheck(false); // Show results
-      await loadImageStorageInfo();
-    } catch (error) {
-      Alert.alert("Error", "Health check failed");
-    } finally {
-      setHealthChecking(false);
-    }
-  };
-  
-  const handleMigrateImages = async () => {
-    setMigrating(true);
-    try {
-      const result = await migrateAllImages();
-      Alert.alert(
-        "Image Migration",
-        result.message,
-        [{ text: "OK", onPress: loadImageStorageInfo }]
-      );
-    } catch (error) {
-      Alert.alert("Error", "Failed to migrate images");
-    } finally {
-      setMigrating(false);
-    }
-  };
-  
+
   React.useEffect(() => {
     loadImageStorageInfo();
-    loadBackupStatus();
+    loadDatabaseStatus();
   }, []);
-  
+
   const handleClearAll = () => {
     Alert.alert(
       "Clear All Garments",
       "This will delete all your garments and wear history. This cannot be undone.",
       [
         { text: "Cancel", style: "cancel" },
-        { 
-          text: "Clear All", 
+        {
+          text: "Clear All",
           style: "destructive",
           onPress: async () => {
             try {
@@ -147,7 +267,7 @@ export default function SettingsScreen() {
     try {
       const result = await updateAllGarmentsWithMultipleDressCodes();
       Alert.alert(
-        "🎉 Success!", 
+        "🎉 Success!",
         `Updated ${result.updated} garments with multiple dress codes. Now try switching between casual/business/sport modes!`
       );
     } catch (error: any) {
@@ -160,9 +280,9 @@ export default function SettingsScreen() {
       const jsonData = await exportGarments();
       const filename = `closy-backup-${new Date().toISOString().split('T')[0]}.json`;
       const fileUri = FileSystem.documentDirectory + filename;
-      
+
       await FileSystem.writeAsStringAsync(fileUri, jsonData);
-      
+
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(fileUri, {
           mimeType: 'application/json',
@@ -178,180 +298,279 @@ export default function SettingsScreen() {
 
   const handleImport = async () => {
     try {
-      console.log("Starting import process...");
       const result = await DocumentPicker.getDocumentAsync({
         type: 'application/json',
         copyToCacheDirectory: true
       });
-      
-      console.log("DocumentPicker result:", result);
-      
-      if (result.assets && result.assets[0]) {
-        console.log("Reading file:", result.assets[0].uri);
-        const fileContent = await FileSystem.readAsStringAsync(result.assets[0].uri);
-        console.log("File content length:", fileContent.length);
-        
-        const importResult = await importGarments(fileContent);
-        console.log("Import result:", importResult);
-        
-        Alert.alert(
-          "📦 Import Complete",
-          `Imported ${importResult.imported} garments.\nSkipped ${importResult.skipped} existing items.`
-        );
-      } else {
-        console.log("No file selected or picker cancelled");
-        Alert.alert("No File Selected", "Please select a JSON file to import.");
-      }
-    } catch (error: any) {
-      console.error("Import error:", error);
-      Alert.alert("❌ Import Failed", error?.message ?? "Failed to import garments");
-    }
-  };
 
-  const handleTestImport = async () => {
-    try {
-      // Import from the sample file directly
-      const samplePath = FileSystem.documentDirectory + '../../../sample-restore.json';
-      console.log("Trying to read sample file from:", samplePath);
-      
-      // Try reading the sample file
-      const fileContent = await FileSystem.readAsStringAsync(samplePath);
+      if (result.canceled) return;
+
+      const fileContent = await FileSystem.readAsStringAsync(result.assets[0].uri);
       const importResult = await importGarments(fileContent);
-      
+
       Alert.alert(
-        "📦 Test Import Complete",
-        `Imported ${importResult.imported} sample garments.\nSkipped ${importResult.skipped} existing items.`
+        "✅ Import Complete",
+        `Successfully imported ${importResult.imported} garments!\n${importResult.skipped} items were skipped (duplicates).`
       );
     } catch (error: any) {
-      console.error("Test import error:", error);
-      Alert.alert("❌ Test Import Failed", error?.message ?? "Failed to import sample garments");
+      Alert.alert("❌ Import Failed", error?.message ?? "Failed to import garments");
     }
   };
 
   const handleBatchImageImport = async () => {
     try {
-      // Get all garments without images
-      const garments = await getAllGarments();
-      const garmentsWithoutImages = garments.filter(g => !g.imageUri || g.imageUri === "");
-      
-      if (garmentsWithoutImages.length === 0) {
-        Alert.alert("No garments need images", "All your garments already have images.");
-        return;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true,
+        quality: 0.8,
+        selectionLimit: 20,
+      });
+
+      if (result.canceled || !result.assets) return;
+
+      setImporting(true);
+      const images = result.assets;
+      let importedCount = 0;
+
+      for (let i = 0; i < images.length; i++) {
+        try {
+          setImportProgress({ current: i + 1, total: images.length });
+
+          // Simple import - just add as basic garment
+          const { addGarment } = await import("~/lib/db");
+          const { saveImagePersistently } = await import("~/lib/imageStorage");
+
+          const persistentUri = await saveImagePersistently(images[i].uri);
+
+          await addGarment({
+            type: "top",
+            name: `Imported Item ${i + 1}`,
+            colors: ["white"],
+            warmth: 2,
+            waterResistant: 0,
+            dressCodes: ["casual"],
+            imageUri: persistentUri,
+            timesWorn: 0,
+            isDirty: false,
+            favorite: false
+          });
+
+          importedCount++;
+        } catch (error) {
+          console.error(`Failed to import image ${i + 1}:`, error);
+        }
       }
 
       Alert.alert(
-        "Batch Import Images",
-        `Found ${garmentsWithoutImages.length} garments without images.\n\nYou can select multiple photos at once (up to 100 on iOS).\n\nPhotos will be assigned to garments in order.`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Select Photos",
-            onPress: async () => {
-              setImporting(true);
-              setImportProgress({ current: 0, total: garmentsWithoutImages.length });
-              
-              try {
-                const result = await ImagePicker.launchImageLibraryAsync({
-                  mediaTypes: ['images'],
-                  allowsMultipleSelection: true,
-                  quality: 0.8,
-                  selectionLimit: Math.min(garmentsWithoutImages.length, 100)
-                });
-
-                if (!result.canceled && result.assets) {
-                  const numPhotos = result.assets.length;
-                  const numToUpdate = Math.min(numPhotos, garmentsWithoutImages.length);
-                  
-                  for (let i = 0; i < numToUpdate; i++) {
-                    setImportProgress({ current: i + 1, total: numToUpdate });
-                    await updateGarment(garmentsWithoutImages[i].id, {
-                      imageUri: result.assets[i].uri
-                    });
-                  }
-                  
-                  Alert.alert(
-                    "✅ Import Complete",
-                    `Successfully added ${numToUpdate} images to your garments.${numToUpdate < garmentsWithoutImages.length ? `\n\n${garmentsWithoutImages.length - numToUpdate} garments still need images.` : ''}`
-                  );
-                }
-              } catch (error: any) {
-                Alert.alert("Error", error?.message ?? "Failed to import images");
-              } finally {
-                setImporting(false);
-                setImportProgress({ current: 0, total: 0 });
-              }
-            }
-          }
-        ]
+        "✅ Import Complete",
+        `Successfully imported ${importedCount} of ${images.length} images!`
       );
     } catch (error: any) {
-      Alert.alert("Error", error?.message ?? "Failed to check garments");
+      Alert.alert("❌ Import Failed", error?.message ?? "Failed to import images");
+    } finally {
+      setImporting(false);
+      setImportProgress({ current: 0, total: 0 });
     }
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.push('/')}>
-          <Text style={styles.navLink}>← Today</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Settings</Text>
-        <TouchableOpacity onPress={() => router.push('/closet')}>
-          <Text style={styles.navLink}>Closet ⌕</Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        {/* Quick Navigation */}
-        <View style={styles.quickNavCard}>
-          <Text style={styles.cardTitle}>Quick Navigation</Text>
-          <View style={styles.quickNavRow}>
-            <TouchableOpacity style={styles.quickNavButton} onPress={() => router.push('/')}>
-              <Text style={styles.quickNavIcon}>📅</Text>
-              <Text style={styles.quickNavText}>Today</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.quickNavButton} onPress={() => router.push('/closet')}>
-              <Text style={styles.quickNavIcon}>👔</Text>
-              <Text style={styles.quickNavText}>Closet</Text>
-            </TouchableOpacity>
-          </View>
+    <SafeAreaView style={styles.container}>
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Text style={styles.backButtonText}>← Today</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Settings</Text>
+          <TouchableOpacity onPress={() => router.push('/closet')} style={styles.headerButton}>
+            <Text style={styles.headerButtonText}>Closet →</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Backup & Restore - Updated */}
+        {/* Database Status */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>💾 Backup & Restore</Text>
+          <Text style={styles.cardTitle}>🗃️ Database Status</Text>
           <Text style={styles.cardDescription}>
-            Keep your wardrobe data safe with backup and restore options.
+            Development vs Production data comparison.
           </Text>
-          
+
+          {dbStatus && (
+            <View style={styles.infoBox}>
+              <Text style={[styles.infoText, { fontWeight: 'bold', marginBottom: 8 }]}>
+                📱 Production (TestFlight):
+              </Text>
+              <Text style={styles.infoText}>
+                👔 {dbStatus.production.garments} garments
+              </Text>
+              <Text style={styles.infoText}>
+                📷 {dbStatus.production.images} images
+              </Text>
+
+              <Text style={[styles.infoText, { fontWeight: 'bold', marginTop: 12, marginBottom: 8 }]}>
+                💻 Development (Expo Go):
+              </Text>
+              <Text style={styles.infoText}>
+                👔 {dbStatus.development.garments} garments
+              </Text>
+              <Text style={styles.infoText}>
+                📷 {dbStatus.development.images} images
+              </Text>
+            </View>
+          )}
+
           <View style={styles.buttonGroup}>
-            <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.success }]} onPress={handleExport}>
-              <Text style={styles.primaryButtonText}>📤 Export Wardrobe</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={styles.secondaryButton} onPress={handleImport}>
-              <Text style={styles.secondaryButtonText}>📥 Import Wardrobe</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.secondaryButton, { backgroundColor: colors.primary }]} onPress={handleTestImport}>
-              <Text style={[styles.secondaryButtonText, { color: 'white' }]}>🧪 Test Import (Sample Data)</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity 
-              style={[styles.primaryButton, { backgroundColor: colors.success, marginTop: 8 }]} 
-              onPress={handleRestoreBackup}
-              disabled={migrating}
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.danger }]}
+              onPress={handleDebugDatabases}
+              disabled={copying}
             >
-              {migrating ? (
-                <ActivityIndicator size="small" color="white" />
+              {copying ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryButtonText}>Debugging...</Text>
+                </View>
               ) : (
-                <Text style={styles.primaryButtonText}>🔄 Quick Restore from Backup</Text>
+                <Text style={styles.primaryButtonText}>🔍 DEBUG: Find Real Data</Text>
               )}
             </TouchableOpacity>
 
-            <TouchableOpacity 
-              style={[styles.primaryButton, { backgroundColor: colors.primary }]} 
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.success }]}
+              onPress={handleCopyProductionToDev}
+              disabled={copying}
+            >
+              {copying ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryButtonText}>Copying...</Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryButtonText}>📋 Copy Production → Dev</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.secondaryButton}
+              onPress={() => {
+                loadImageStorageInfo();
+                loadDatabaseStatus();
+              }}
+            >
+              <Text style={styles.secondaryButtonText}>🔄 Refresh Status</Text>
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.helpText}>
+            🔍 DEBUG finds where your real 110 garments are stored.
+            📋 Copy safely transfers data between environments.
+          </Text>
+        </View>
+
+        {/* Image Storage */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>🖼️ Image Storage & Recovery</Text>
+          <Text style={styles.cardDescription}>
+            Your images are saved in persistent storage. Recover lost garments from orphaned images.
+          </Text>
+
+          {imageStorageInfo && (
+            <View style={styles.infoBox}>
+              <Text style={styles.infoText}>
+                📁 {imageStorageInfo.fileCount} images stored
+              </Text>
+              <Text style={styles.infoText}>
+                💾 {imageStorageInfo.totalSizeMB} MB used
+              </Text>
+              <Text style={[styles.infoText, { fontSize: 11, marginTop: 4, color: colors.lightText }]}>
+                📍 Location: {imageStorageInfo.path.includes('closy/') ? 'closy/images/' : 'garment_images/'}
+              </Text>
+            </View>
+          )}
+
+          <View style={styles.buttonGroup}>
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.accent }]}
+              onPress={handleCheckOrphanedImages}
+              disabled={recovering}
+            >
+              {recovering ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryButtonText}>Checking...</Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryButtonText}>🔍 Check for Lost Images</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.success }]}
+              onPress={handleRecoverImages}
+              disabled={recovering}
+            >
+              {recovering ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryButtonText}>Recovering...</Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryButtonText}>🚀 Recover Lost Garments</Text>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+              onPress={handleStorageAnalysis}
+              disabled={recovering}
+            >
+              {recovering ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                  <Text style={styles.primaryButtonText}>Analyzing...</Text>
+                </View>
+              ) : (
+                <Text style={styles.primaryButtonText}>📊 Analyze Storage Locations</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.helpText}>
+            If you've lost garments but still have images, use recovery to restore them.
+          </Text>
+        </View>
+
+        {/* Export/Import */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>📤 Export & Import Database</Text>
+          <Text style={styles.cardDescription}>
+            Transfer your wardrobe between TestFlight and Development.
+          </Text>
+
+          <View style={styles.buttonGroup}>
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.primary }]}
+              onPress={exportCurrentDatabase}
+            >
+              <Text style={styles.primaryButtonText}>📤 Export Database</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.success }]}
+              onPress={importDatabaseFromFile}
+            >
+              <Text style={styles.primaryButtonText}>📥 Import Database File</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.success }]} onPress={handleExport}>
+              <Text style={styles.primaryButtonText}>📤 Export JSON</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.secondaryButton} onPress={handleImport}>
+              <Text style={styles.secondaryButtonText}>📥 Import JSON</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.primaryButton, { backgroundColor: colors.primary }]}
               onPress={handleBatchImageImport}
               disabled={importing}
             >
@@ -367,378 +586,31 @@ export default function SettingsScreen() {
               )}
             </TouchableOpacity>
           </View>
-          
-          <Text style={styles.helpText}>
-            Export creates a JSON backup of all your garments and wear history.
-          </Text>
-        </View>
 
-        {/* Automatic Backup */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>🛡️ Automatic Protection</Text>
-          <Text style={styles.cardDescription}>
-            Your wardrobe is automatically backed up daily and protected from data loss.
-          </Text>
-          
-          {backupStatus && (
-            <View style={styles.infoBox}>
-              <Text style={styles.infoText}>
-                📦 {backupStatus.backupCount} backups kept
-              </Text>
-              {backupStatus.lastBackupDate && (
-                <Text style={styles.infoText}>
-                  🕒 Last backup: {new Date(backupStatus.lastBackupDate).toLocaleDateString()}
-                </Text>
-              )}
-              <Text style={styles.infoText}>
-                💾 {(backupStatus.totalSize / 1024).toFixed(1)} KB used
-              </Text>
-            </View>
-          )}
-          
-          <View style={styles.buttonGroup}>
-            <TouchableOpacity 
-              style={[styles.primaryButton, { backgroundColor: colors.success }]} 
-              onPress={handleCreateBackup}
-              disabled={migrating}
-            >
-              {migrating ? (
-                <ActivityIndicator size="small" color="white" />
-              ) : (
-                <Text style={styles.primaryButtonText}>📦 Create Backup Now</Text>
-              )}
-            </TouchableOpacity>
-            
-            {backupStatus && backupStatus.backupCount > 0 && (
-              <TouchableOpacity 
-                style={[styles.primaryButton, { backgroundColor: colors.primary, marginTop: 8 }]} 
-                onPress={handleRestoreBackup}
-                disabled={migrating}
-              >
-                {migrating ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>🔄 Restore Latest Backup</Text>
-                )}
-              </TouchableOpacity>
-            )}
-          </View>
-          
           <Text style={styles.helpText}>
-            Automatic daily backups ensure you never lose your wardrobe data. No manual action needed!
-          </Text>
-        </View>
-
-        {/* Image Storage */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>🖼️ Image Storage</Text>
-          <Text style={styles.cardDescription}>
-            Your images are now saved in persistent storage that won't be lost during app updates.
-          </Text>
-          
-          {imageStorageInfo && (
-            <View style={styles.infoBox}>
-              <Text style={styles.infoText}>
-                📁 {imageStorageInfo.fileCount} images stored
-              </Text>
-              <Text style={styles.infoText}>
-                💾 {imageStorageInfo.totalSizeMB} MB used
-              </Text>
-            </View>
-          )}
-          
-          <View style={styles.buttonGroup}>
-            <TouchableOpacity 
-              style={[styles.primaryButton, { backgroundColor: colors.primary }]} 
-              onPress={handleHealthCheck}
-              disabled={healthChecking}
-            >
-              {healthChecking ? (
-                <ActivityIndicator size="small" color="white" />
-              ) : (
-                <Text style={styles.primaryButtonText}>🏥 Health Check & Repair</Text>
-              )}
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.secondaryButton, { borderColor: colors.primary }]} 
-              onPress={handleMigrateImages}
-              disabled={migrating}
-            >
-              {migrating ? (
-                <ActivityIndicator size="small" color={colors.primary} />
-              ) : (
-                <Text style={[styles.secondaryButtonText, { color: colors.primary }]}>🔄 Migrate Cache</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-          
-          <Text style={styles.helpText}>
-            This ensures all your garment images are safely stored and won't be lost when the app updates.
+            Export saves your data as JSON. Import adds items from backup files.
           </Text>
         </View>
 
         {/* Development Tools */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>🔧 Developer Tools</Text>
+          <Text style={styles.cardTitle}>🛠️ Developer Tools</Text>
           <Text style={styles.cardDescription}>
             Advanced options for managing your wardrobe data.
           </Text>
-          
+
           <View style={styles.buttonGroup}>
-            <TouchableOpacity style={styles.primaryButton} onPress={async () => {
-              try {
-                console.log("=== DATABASE DIAGNOSTIC ===");
-                const garments = await getAllGarments();
-                console.log("getAllGarments() returned:", garments.length, "items");
-                
-                // Check orphaned images
-                const { checkOrphanedImages } = await import("~/lib/imageRecovery");
-                const orphanCheck = await checkOrphanedImages();
-                console.log("Orphaned image check:", orphanCheck);
-                
-                Alert.alert(
-                  "🩺 Database Diagnostic", 
-                  `Database: ${garments.length} garments\nImages: ${orphanCheck.imageCount} files\n\n${orphanCheck.imageCount > garments.length ? `${orphanCheck.imageCount - garments.length} orphaned images found!` : 'No orphaned images'}`
-                );
-              } catch (error: any) {
-                console.error("Database diagnostic error:", error);
-                Alert.alert("Error", error?.message || "Database query failed");
-              }
-            }}>
-              <Text style={styles.primaryButtonText}>🩺 Database Diagnostic</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.primaryButton} onPress={async () => {
-              try {
-                const { addSampleData } = await import("~/lib/sampleData");
-                
-                Alert.alert(
-                  "🎨 Add Sample Data",
-                  "This will add 19 sample garments to your local database for testing. Continue?",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    { 
-                      text: "Add Samples", 
-                      onPress: async () => {
-                        try {
-                          const count = await addSampleData();
-                          Alert.alert(
-                            "✅ Sample Data Added",
-                            `Successfully added ${count} garments to your database!\n\nGo to Closet to see them.`,
-                            [
-                              { text: "OK" },
-                              { text: "Go to Closet", onPress: () => router.push('/closet') }
-                            ]
-                          );
-                        } catch (error: any) {
-                          Alert.alert("❌ Failed", error?.message || "Could not add sample data");
-                        }
-                      }
-                    }
-                  ]
-                );
-              } catch (error: any) {
-                Alert.alert("Error", error?.message || "Sample data system failed");
-              }
-            }}>
-              <Text style={styles.primaryButtonText}>🎨 Add Sample Data (Dev)</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.primaryButton} onPress={async () => {
-              try {
-                const { recoverFromOrphanedImages } = await import("~/lib/imageRecovery");
-                
-                Alert.alert(
-                  "🔄 Recover Lost Garments",
-                  "This will create database records for any images that exist but don't have garment records. Continue?",
-                  [
-                    { text: "Cancel", style: "cancel" },
-                    { 
-                      text: "Recover", 
-                      onPress: async () => {
-                        try {
-                          const result = await recoverFromOrphanedImages();
-                          Alert.alert(
-                            "✅ Recovery Complete",
-                            `Recovered ${result.recovered} garments from orphaned images!\n\nGo to Closet to see them.`
-                          );
-                        } catch (error: any) {
-                          Alert.alert("❌ Recovery Failed", error?.message || "Recovery process failed");
-                        }
-                      }
-                    }
-                  ]
-                );
-              } catch (error: any) {
-                Alert.alert("Error", error?.message || "Recovery system failed");
-              }
-            }}>
-              <Text style={styles.primaryButtonText}>🔄 Recover Lost Garments</Text>
-            </TouchableOpacity>
-
             <TouchableOpacity style={styles.primaryButton} onPress={handleUpdateDressCodes}>
               <Text style={styles.primaryButtonText}>🔄 Fix Dress Codes</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.primaryButton} onPress={() => {
-              Alert.alert(
-                "Manual Category Review",
-                "To fix categories manually:\n\n1. Go to Closet screen\n2. Use the Type filter to see items by category\n3. Long-press any item to edit and change its type\n\nThis gives you full control over categorization instead of unreliable auto-detection.",
-                [
-                  { text: "Got it", style: "default" },
-                  { 
-                    text: "Go to Closet", 
-                    onPress: () => router.push('/closet')
-                  }
-                ]
-              );
-            }}>
-              <Text style={styles.primaryButtonText}>👔 Manual Category Review</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.primaryButton} onPress={async () => {
-              try {
-                const garments = await getAllGarments();
-                
-                // Check for orphaned images
-                const { checkOrphanedImages } = await import("~/lib/imageRecovery");
-                const orphanCheck = await checkOrphanedImages();
-                
-                if (orphanCheck.imageCount > garments.length) {
-                  // We have orphaned images - offer recovery
-                  Alert.alert(
-                    "🚨 Data Recovery Available",
-                    `Database: ${garments.length} garments\nImages: ${orphanCheck.imageCount} files\n\n${orphanCheck.imageCount - garments.length} orphaned images found!\n\nRecover your lost garments?`,
-                    [
-                      { text: "Cancel", style: "cancel" },
-                      { 
-                        text: "🔄 Recover Now", 
-                        onPress: async () => {
-                          try {
-                            const { recoverFromOrphanedImages } = await import("~/lib/imageRecovery");
-                            const result = await recoverFromOrphanedImages();
-                            Alert.alert(
-                              "✅ Recovery Complete!",
-                              `Recovered ${result.recovered} garments from orphaned images!\n\nGo to Closet to see them.`
-                            );
-                          } catch (error: any) {
-                            Alert.alert("❌ Recovery Failed", error?.message || "Recovery process failed");
-                          }
-                        }
-                      }
-                    ]
-                  );
-                } else {
-                  // Normal debug info
-                  let debugInfo = "=== DATABASE STATUS ===\n\n";
-                  debugInfo += `Database: ${garments.length} garments\n`;
-                  debugInfo += `Images: ${orphanCheck.imageCount} files\n`;
-                  debugInfo += garments.length > 0 ? "✅ Database working normally" : "❌ Database is empty";
-                  
-                  Alert.alert("🔍 Debug Status", debugInfo);
-                }
-                
-              } catch (error: any) {
-                Alert.alert("Debug Error", error?.message || "Failed to run diagnostics");
-              }
-            }}>
-              <Text style={styles.primaryButtonText}>🔍 Deep Debug & Recovery</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.primaryButton} onPress={async () => {
-              try {
-                console.log("🔧 Starting image recovery process...");
-                
-                // Check for orphaned images
-                const { checkOrphanedImages, recoverFromOrphanedImages } = await import("~/lib/imageRecovery");
-                const orphanCheck = await checkOrphanedImages();
-                
-                console.log("Orphan check result:", orphanCheck);
-                
-                if (orphanCheck.imageCount > orphanCheck.garmentCount) {
-                  const orphanCount = orphanCheck.imageCount - orphanCheck.garmentCount;
-                  
-                  Alert.alert(
-                    "🔧 Recover Lost Garments",
-                    `Found ${orphanCount} orphaned images!\n\nDatabase: ${orphanCheck.garmentCount} garments\nImages: ${orphanCheck.imageCount} files\n\nRecover your lost garments now?`,
-                    [
-                      { text: "Cancel", style: "cancel" },
-                      { 
-                        text: "🚀 Recover All", 
-                        onPress: async () => {
-                          try {
-                            console.log("Starting recovery...");
-                            const result = await recoverFromOrphanedImages();
-                            console.log("Recovery result:", result);
-                            
-                            Alert.alert(
-                              "🎉 SUCCESS!",
-                              `Recovered ${result.recovered} garments!\n\nGo to Closet to see all your items.`,
-                              [{ text: "Go to Closet", onPress: () => router.push('/closet') }]
-                            );
-                          } catch (error: any) {
-                            console.error("Recovery failed:", error);
-                            Alert.alert("❌ Recovery Failed", error?.message || "Recovery process failed");
-                          }
-                        }
-                      }
-                    ]
-                  );
-                } else {
-                  Alert.alert(
-                    "✅ No Recovery Needed", 
-                    `Database: ${orphanCheck.garmentCount} garments\nImages: ${orphanCheck.imageCount} files\n\nNo orphaned images found.`
-                  );
-                }
-                
-              } catch (error: any) {
-                console.error("Recovery check failed:", error);
-                Alert.alert("❌ Error", error?.message || "Failed to check for recoverable images");
-              }
-            }}>
-              <Text style={styles.primaryButtonText}>🔧 Fix Broken Images</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity style={[styles.dangerButton]} onPress={handleClearAll}>
-              <Text style={styles.dangerButtonText}>🗑️ Clear All Data</Text>
+            <TouchableOpacity style={[styles.primaryButton, { backgroundColor: colors.danger }]} onPress={handleClearAll}>
+              <Text style={styles.primaryButtonText}>🗑️ Clear All Data</Text>
             </TouchableOpacity>
           </View>
-        </View>
 
-        {/* Future Features */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>🚀 Coming Soon</Text>
-          <Text style={styles.cardDescription}>
-            Features we're working on for future updates.
-          </Text>
-          
-          <View style={styles.featureList}>
-            <View style={styles.featureItem}>
-              <Text style={styles.featureIcon}>📍</Text>
-              <Text style={styles.featureText}>Custom location settings</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Text style={styles.featureIcon}>🔔</Text>
-              <Text style={styles.featureText}>Morning outfit notifications</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Text style={styles.featureIcon}>👔</Text>
-              <Text style={styles.featureText}>Default dress code preferences</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Text style={styles.featureIcon}>📊</Text>
-              <Text style={styles.featureText}>Outfit history and analytics</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* App Info */}
-        <View style={styles.infoCard}>
-          <Text style={styles.appName}>Closy</Text>
-          <Text style={styles.version}>Version 1.0.0</Text>
-          <Text style={styles.description}>
-            Your smart wardrobe companion for weather-based outfit suggestions.
+          <Text style={styles.helpText}>
+            Use these tools to fix data issues or start fresh.
           </Text>
         </View>
       </ScrollView>
@@ -747,208 +619,107 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  container: {
     flex: 1,
     backgroundColor: colors.background,
   },
-  container: {
+  scrollView: {
     flex: 1,
-    paddingHorizontal: 16,
   },
-  
-  // Header
+  content: {
+    padding: 16,
+  },
   header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
   },
-  title: {
+  backButton: {
+    padding: 8,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  headerTitle: {
     fontSize: 24,
-    fontWeight: "700",
+    fontWeight: 'bold',
     color: colors.text,
   },
-  navLink: {
-    color: colors.accent,
-    fontWeight: "600",
-    fontSize: 16,
+  headerButton: {
+    padding: 8,
   },
-  
-  // Cards
+  headerButtonText: {
+    fontSize: 16,
+    color: colors.primary,
+    fontWeight: '600',
+  },
   card: {
     backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
     elevation: 3,
   },
-  
-  quickNavCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 16,
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  
   cardTitle: {
     fontSize: 18,
-    fontWeight: "700",
+    fontWeight: 'bold',
     color: colors.text,
     marginBottom: 8,
   },
-  
   cardDescription: {
     fontSize: 14,
     color: colors.lightText,
-    marginBottom: 20,
-    lineHeight: 20,
-  },
-  
-  // Quick Navigation
-  quickNavRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  quickNavButton: {
-    flex: 1,
-    alignItems: "center",
-    padding: 16,
-    backgroundColor: colors.secondary,
-    borderRadius: 12,
-  },
-  quickNavIcon: {
-    fontSize: 24,
-    marginBottom: 8,
-  },
-  quickNavText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: colors.text,
-  },
-  
-  // Buttons
-  buttonGroup: {
-    gap: 12,
     marginBottom: 16,
   },
-  
-  primaryButton: {
-    backgroundColor: colors.primary,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  primaryButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: colors.card,
-  },
-  
-  secondaryButton: {
-    backgroundColor: colors.secondary,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  secondaryButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: colors.text,
-  },
-  
-  dangerButton: {
-    backgroundColor: colors.danger,
-    paddingVertical: 14,
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  dangerButtonText: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: colors.card,
-  },
-  
-  helpText: {
-    fontSize: 12,
-    color: colors.lightText,
-    fontStyle: "italic",
-  },
-  
   infoBox: {
     backgroundColor: colors.secondary,
-    padding: 12,
     borderRadius: 8,
+    padding: 12,
     marginBottom: 16,
   },
-  
   infoText: {
     fontSize: 14,
     color: colors.text,
-    marginVertical: 2,
-  },
-  
-  // Feature List
-  featureList: {
-    gap: 12,
-  },
-  featureItem: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  featureIcon: {
-    fontSize: 16,
-    marginRight: 12,
-    width: 24,
-  },
-  featureText: {
-    fontSize: 14,
-    color: colors.lightText,
-    flex: 1,
-  },
-  
-  // App Info
-  infoCard: {
-    backgroundColor: colors.card,
-    borderRadius: 16,
-    padding: 24,
-    marginTop: 16,
-    marginBottom: 32,
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 3,
-  },
-  appName: {
-    fontSize: 28,
-    fontWeight: "700",
-    color: colors.primary,
     marginBottom: 4,
   },
-  version: {
-    fontSize: 14,
-    color: colors.lightText,
-    marginBottom: 12,
+  buttonGroup: {
+    gap: 12,
   },
-  description: {
-    fontSize: 14,
+  primaryButton: {
+    backgroundColor: colors.primary,
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+  },
+  primaryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  secondaryButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: colors.border,
+    borderRadius: 8,
+    padding: 14,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    color: colors.text,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  helpText: {
+    fontSize: 12,
     color: colors.lightText,
-    textAlign: "center",
-    lineHeight: 20,
+    marginTop: 12,
+    textAlign: 'center',
   },
 });

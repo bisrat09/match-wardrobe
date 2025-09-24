@@ -23,7 +23,11 @@ async function initializeDatabase(): Promise<SQLite.SQLiteDatabase> {
     // Add small delay to ensure app is fully initialized
     await new Promise(resolve => setTimeout(resolve, 100));
     
-    const database = SQLite.openDatabaseSync("closet.db");
+    // CRITICAL: Use separate databases for dev vs production to prevent data loss
+    const isDev = __DEV__ || process.env.NODE_ENV === 'development';
+    const dbName = isDev ? "closet_dev.db" : "closet.db";
+    console.log(`⚠️ Using database: ${dbName} (isDev: ${isDev})`);
+    const database = SQLite.openDatabaseSync(dbName);
     
     // Initialize database tables
     database.execSync(
@@ -254,6 +258,22 @@ export async function clearAllGarments() {
   await database.runAsync(`DELETE FROM garments`);
   await database.runAsync(`DELETE FROM wear_logs`);
   return { success: true };
+}
+
+export async function updateAllImagePaths(): Promise<number> {
+  const database = await getDatabase();
+  const OLD_DIR = 'garment_images/';
+  const NEW_DIR = 'closy/images/';
+
+  // Update all garments with old image paths to new paths
+  const result = await database.runAsync(
+    `UPDATE garments
+     SET imageUri = REPLACE(imageUri, ?, ?)
+     WHERE imageUri LIKE ?`,
+    [OLD_DIR, NEW_DIR, '%' + OLD_DIR + '%']
+  );
+
+  return result.changes;
 }
 
 export async function updateAllGarmentsWithMultipleDressCodes() {

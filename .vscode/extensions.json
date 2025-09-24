@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "anthropic.claude",
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint"
+  ],
+  "unwantedRecommendations": [
+    "openai.openai-chatgpt"
+  ]
+}

@@ -21,7 +21,7 @@ import type { Garment, ClothingType, DressCode, Warmth } from "~/lib/types";
 import GarmentCard from "~/components/GarmentCard";
 import { saveImagePersistently, deletePersistedImage } from "~/lib/imageStorage";
 import { migrateAllImages } from "~/lib/imageMigration";
-import { checkAndCreateBackup } from "~/lib/autoBackup";
+// import { checkAndCreateBackup } from "~/lib/autoBackup"; // REMOVED: Destructive
 import { performImageHealthCheck } from "~/lib/imageHealthCheck";
 
 // Color palette - Burnt Orange Theme
@@ -43,31 +43,8 @@ const SCREEN = Dimensions.get("window");
 const GUTTER = 12;
 const CARD_WIDTH = Math.floor((SCREEN.width - (16 * 2) - GUTTER) / 2);
 
-const getColorValue = (color: string) => {
-  const colorMap: { [key: string]: string } = {
-    black: "#000000",
-    white: "#f5f5f5",
-    gray: "#808080",
-    navy: "#000080",
-    brown: "#8B4513",
-    red: "#FF0000",
-    pink: "#FFC0CB",
-    orange: "#FFA500",
-    yellow: "#FFFF00",
-    gold: "#FFD700",
-    blue: "#0000FF",
-    lightblue: "#ADD8E6",
-    green: "#008000",
-    olive: "#808000",
-    purple: "#800080",
-    beige: "#F5F5DC",
-    cream: "#FFFDD0",
-    tan: "#D2B48C",
-    maroon: "#800000",
-    teal: "#008080"
-  };
-  return colorMap[color] || color;
-};
+import { COLOR_PALETTE, COLOR_NAMES, getColorValue } from '~/lib/colorExtraction';
+import { analyzeImageColors, pickColorFromPoint, getSuggestedPalette } from '~/lib/colorAnalysis';
 
 export default function ClosetScreen() {
   const [items, setItems] = useState<Garment[]>([]);
@@ -107,12 +84,8 @@ export default function ClosetScreen() {
     try {
       // Run maintenance tasks on first load only
       if (!isRefreshing && items.length === 0) {
-        // 1. Create automatic backup
-        await checkAndCreateBackup();
-        
-        // 2. DISABLED - Image health check causing crashes with deprecated API
-        // const healthCheck = await performImageHealthCheck(true); // Silent mode
-        // if (healthCheck.missingImages > 0 || healthCheck.repairedImages > 0) {
+        // REMOVED: All automatic backup and recovery functions were destructive
+        // No automatic operations on startup
         //   console.log(`Health check: ${healthCheck.repairedImages} repaired, ${healthCheck.missingImages} missing`);
         // }
         
@@ -200,74 +173,17 @@ export default function ClosetScreen() {
   useEffect(() => { load(); }, []);
 
   const openImagePicker = async () => {
-    // DISABLED - Check for orphaned images uses deprecated API
-    /*
-    try {
-      const { checkOrphanedImages, recoverFromOrphanedImages } = await import("~/lib/imageRecovery");
-      const orphanCheck = await checkOrphanedImages();
-      
-      if (orphanCheck.imageCount > items.length && orphanCheck.imageCount > 1) {
-        // We have orphaned images - offer recovery
-        Alert.alert(
-          "🔍 Found Lost Data!",
-          `Found ${orphanCheck.imageCount - items.length} orphaned images from your previous wardrobe!\n\nRecover all your garments now?`,
-          [
-            { 
-              text: "Add New Item", 
-              style: "cancel",
-              onPress: async () => {
-                // Normal add flow
-                const img = await ImagePicker.launchImageLibraryAsync({ 
-                  mediaTypes: ['images'], 
-                  quality: 0.8 
-                });
-                if (!img.canceled) {
-                  setSelectedImage(img.assets[0].uri);
-                  setShowModal(true);
-                }
-              }
-            },
-            { 
-              text: "🚀 Recover All", 
-              onPress: async () => {
-                try {
-                  const result = await recoverFromOrphanedImages();
-                  Alert.alert(
-                    "🎉 Recovery Complete!",
-                    `Recovered ${result.recovered} garments!\n\nYour wardrobe is back!`,
-                    [{ text: "Amazing!", onPress: () => load() }]
-                  );
-                } catch (error: any) {
-                  Alert.alert("❌ Recovery Failed", error?.message || "Recovery process failed");
-                }
-              }
-            }
-          ]
-        );
-      } else {
-        // Normal add flow - no orphaned images
-        const img = await ImagePicker.launchImageLibraryAsync({ 
-          mediaTypes: ['images'], 
-          quality: 0.8 
-        });
-        if (!img.canceled) {
-          setSelectedImage(img.assets[0].uri);
-          setShowModal(true);
-        }
-      }
-    } catch (error) {
-      console.error("Recovery check failed:", error);
-      */
-      // Fallback to normal add - always use this now
-      const img = await ImagePicker.launchImageLibraryAsync({ 
-        mediaTypes: ['images'], 
-        quality: 0.8 
-      });
-      if (!img.canceled) {
-        setSelectedImage(img.assets[0].uri);
-        setShowModal(true);
-      }
-    // End of function - removed extra brace
+    // Simple add flow - no recovery check
+    const img = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8
+    });
+    if (!img.canceled) {
+      setSelectedImage(img.assets[0].uri);
+      setShowModal(true);
+      // Auto-analyze colors from the image
+      analyzeColors(img.assets[0].uri);
+    }
   };
 
   const handleSaveGarment = async () => {
@@ -490,15 +406,58 @@ export default function ClosetScreen() {
     setEditingGarment(null);
   };
 
-  const allColors = [
-    "black", "white", "gray", "navy", "brown",
-    "red", "pink", "orange", "yellow", "gold",
-    "blue", "lightblue", "green", "olive", "purple",
-    "beige", "cream", "tan", "maroon", "teal"
-  ];
+  const allColors = COLOR_NAMES;
+  const [suggestedColors, setSuggestedColors] = useState<string[]>([]);
+  const [isAnalyzingColors, setIsAnalyzingColors] = useState(false);
+  const [eyedropperActive, setEyedropperActive] = useState(false);
 
   const onRefresh = () => {
     load(true);
+  };
+
+  // Analyze colors from selected image
+  const analyzeColors = async (imageUri: string) => {
+    setIsAnalyzingColors(true);
+    try {
+      const extractedColors = await analyzeImageColors(imageUri);
+      if (extractedColors.length > 0) {
+        // Set extracted colors as selected
+        setSelectedColors(extractedColors);
+
+        // Get suggested palette
+        const suggestions = getSuggestedPalette(extractedColors);
+        setSuggestedColors(suggestions);
+      }
+    } catch (error) {
+      console.error('Error analyzing colors:', error);
+    } finally {
+      setIsAnalyzingColors(false);
+    }
+  };
+
+  // Handle eyedropper color pick
+  const handleEyedropper = async (nativeEvent: any) => {
+    if (!eyedropperActive || !selectedImage) return;
+
+    try {
+      const { locationX, locationY } = nativeEvent;
+      const pickedColor = await pickColorFromPoint(
+        selectedImage,
+        locationX,
+        locationY,
+        300, // image width in modal
+        300  // image height in modal
+      );
+
+      if (pickedColor && !selectedColors.includes(pickedColor)) {
+        setSelectedColors([...selectedColors, pickedColor]);
+      }
+
+      setEyedropperActive(false);
+    } catch (error) {
+      console.error('Error picking color:', error);
+      setEyedropperActive(false);
+    }
   };
 
   if (loading) {
@@ -712,18 +671,39 @@ export default function ClosetScreen() {
 
               {selectedImage ? (
                 <View style={{ position: 'relative' }}>
-                  <Image source={{ uri: selectedImage }} style={styles.modalImage} />
-                  <TouchableOpacity 
+                  <TouchableOpacity
+                    onPress={handleEyedropper}
+                    activeOpacity={eyedropperActive ? 1 : 0.7}
+                  >
+                    <Image source={{ uri: selectedImage }} style={styles.modalImage} />
+                  </TouchableOpacity>
+                  <TouchableOpacity
                     style={styles.removeImageButton}
                     onPress={() => setSelectedImage(null as any)}
                   >
                     <Text style={styles.removeImageText}>✕</Text>
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.eyedropperButton,
+                      eyedropperActive && styles.eyedropperActive
+                    ]}
+                    onPress={() => setEyedropperActive(!eyedropperActive)}
+                  >
+                    <Text style={styles.eyedropperText}>
+                      {eyedropperActive ? '🎯' : '💧'}
+                    </Text>
+                  </TouchableOpacity>
+                  {isAnalyzingColors && (
+                    <View style={styles.analyzingOverlay}>
+                      <Text style={styles.analyzingText}>Analyzing colors...</Text>
+                    </View>
+                  )}
                 </View>
               ) : editingGarment ? (
                 <View style={{ position: 'relative' }}>
                   <Image source={{ uri: editingGarment.imageUri }} style={styles.modalImage} />
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.replaceImageButton}
                     onPress={openImagePicker}
                   >
@@ -755,27 +735,79 @@ export default function ClosetScreen() {
               </View>
 
               <Text style={styles.modalLabel}>Colors</Text>
-              <View style={styles.colorGrid}>
-                {allColors.map(color => (
-                  <TouchableOpacity
-                    key={color}
-                    style={[
-                      styles.colorChip,
-                      { backgroundColor: getColorValue(color) },
-                      selectedColors.includes(color) && styles.colorChipActive
-                    ]}
-                    onPress={() => {
-                      if (selectedColors.includes(color)) {
-                        setSelectedColors(selectedColors.filter(c => c !== color));
-                      } else {
-                        setSelectedColors([...selectedColors, color]);
-                      }
-                    }}
-                  >
-                    {selectedColors.includes(color) && <Text style={styles.checkmark}>✓</Text>}
-                  </TouchableOpacity>
-                ))}
-              </View>
+
+              {/* Suggested Colors */}
+              {suggestedColors.length > 0 && (
+                <View style={styles.suggestedSection}>
+                  <Text style={styles.suggestedLabel}>Suggested:</Text>
+                  <View style={styles.suggestedColors}>
+                    {suggestedColors.map(color => (
+                      <TouchableOpacity
+                        key={`suggested-${color}`}
+                        style={[
+                          styles.suggestedChip,
+                          { backgroundColor: getColorValue(color) },
+                          selectedColors.includes(color) && styles.colorChipActive
+                        ]}
+                        onPress={() => {
+                          if (selectedColors.includes(color)) {
+                            setSelectedColors(selectedColors.filter(c => c !== color));
+                          } else {
+                            setSelectedColors([...selectedColors, color]);
+                          }
+                        }}
+                      >
+                        {selectedColors.includes(color) && <Text style={styles.checkmark}>✓</Text>}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+
+              {/* Expanded Color Palette */}
+              <ScrollView style={styles.colorScrollView} showsVerticalScrollIndicator={false}>
+                <View style={styles.colorGrid}>
+                  {allColors.map(color => (
+                    <TouchableOpacity
+                      key={color}
+                      style={[
+                        styles.colorChip,
+                        { backgroundColor: getColorValue(color) },
+                        selectedColors.includes(color) && styles.colorChipActive
+                      ]}
+                      onPress={() => {
+                        if (selectedColors.includes(color)) {
+                          setSelectedColors(selectedColors.filter(c => c !== color));
+                        } else {
+                          setSelectedColors([...selectedColors, color]);
+                        }
+                      }}
+                    >
+                      {selectedColors.includes(color) && <Text style={styles.checkmark}>✓</Text>}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+
+              {/* Selected Colors Display */}
+              {selectedColors.length > 0 && (
+                <View style={styles.selectedColorsRow}>
+                  <Text style={styles.selectedLabel}>Selected ({selectedColors.length}):</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={styles.selectedColors}>
+                      {selectedColors.map(color => (
+                        <View
+                          key={`selected-${color}`}
+                          style={[
+                            styles.selectedColorChip,
+                            { backgroundColor: getColorValue(color) }
+                          ]}
+                        />
+                      ))}
+                    </View>
+                  </ScrollView>
+                </View>
+              )}
 
               <Text style={styles.modalLabel}>Warmth Level: {warmth}</Text>
               <View style={styles.warmthRow}>
@@ -1410,5 +1442,98 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.lightText,
     textAlign: "center",
+  },
+
+  // Color Extraction & Eyedropper
+  eyedropperButton: {
+    position: "absolute",
+    bottom: 10,
+    right: 10,
+    backgroundColor: colors.card,
+    borderRadius: 20,
+    padding: 10,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  eyedropperActive: {
+    backgroundColor: colors.primary,
+  },
+  eyedropperText: {
+    fontSize: 20,
+  },
+  analyzingOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 12,
+  },
+  analyzingText: {
+    color: colors.card,
+    fontSize: 14,
+    fontWeight: "600",
+  },
+
+  // Suggested Colors
+  suggestedSection: {
+    marginBottom: 16,
+  },
+  suggestedLabel: {
+    fontSize: 12,
+    color: colors.lightText,
+    marginBottom: 8,
+    fontWeight: "600",
+    textTransform: "uppercase",
+  },
+  suggestedColors: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  suggestedChip: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 3,
+    borderColor: colors.secondary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  // Color Scroll View
+  colorScrollView: {
+    maxHeight: 200,
+    marginBottom: 16,
+  },
+
+  // Selected Colors Display
+  selectedColorsRow: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: colors.secondary,
+  },
+  selectedLabel: {
+    fontSize: 12,
+    color: colors.lightText,
+    marginBottom: 8,
+    fontWeight: "600",
+  },
+  selectedColors: {
+    flexDirection: "row",
+    gap: 6,
+  },
+  selectedColorChip: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: colors.card,
   },
 });
